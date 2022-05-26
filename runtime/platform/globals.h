@@ -725,7 +725,8 @@ inline D bit_copy(const S& source) {
 // compiler builds or when forced.
 #if !defined(PRODUCT) || defined(DART_PRECOMPILER) ||                          \
     defined(FORCE_INCLUDE_DISASSEMBLER)
-#if defined(DART_PRECOMPILED_RUNTIME) && defined(PRODUCT)
+#if defined(DART_PRECOMPILED_RUNTIME) && defined(PRODUCT) &&                   \
+    !defined(DART_DYNAMIC_RUNTIME)
 #error Requested to include IL printer into PRODUCT AOT runtime
 #endif
 #define INCLUDE_IL_PRINTER 1

@@ -58,6 +58,7 @@ void DisassembleToStdout::Print(const char* format, ...) {
   va_end(args);
 }
 
+#if !defined(DART_DYNAMIC_RUNTIME) && !defined(DART_DYNAMIC_PRECOMPILER)
 void DisassembleToJSONStream::ConsumeInstruction(char* hex_buffer,
                                                  intptr_t hex_size,
                                                  char* human_buffer,
@@ -104,6 +105,7 @@ void DisassembleToJSONStream::Print(const char* format, ...) {
   jsarr_.AddValueNull();
   free(p);
 }
+#endif
 
 void DisassembleToMemory::ConsumeInstruction(char* hex_buffer,
                                              intptr_t hex_size,

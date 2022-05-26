@@ -372,6 +372,20 @@ class MarkingWeakVisitor : public HandleVisitor {
 
 void GCMarker::Prologue() {
   isolate_group_->ReleaseStoreBuffers();
+
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  isolate_group_->ForEachIsolate(
+      [&](Isolate* isolate) {
+        Thread* mutator_thread = isolate->mutator_thread();
+        if (mutator_thread != NULL) {
+          Interpreter* interpreter = mutator_thread->interpreter();
+          if (interpreter != NULL) {
+            interpreter->ClearLookupCache();
+          }
+        }
+      },
+      /*at_safepoint=*/true);
+#endif
 }
 
 void GCMarker::Epilogue() {}

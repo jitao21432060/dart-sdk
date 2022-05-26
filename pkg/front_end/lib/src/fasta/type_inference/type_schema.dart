@@ -104,6 +104,10 @@ class UnknownType extends DartType {
   String toString() {
     return "UnknownType(${toStringInternal()})";
   }
+
+  String bdToString() {
+    return "${toStringInternal()}";
+  }
 }
 
 /// Visitor that computes [isKnown].

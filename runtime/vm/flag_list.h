@@ -52,6 +52,17 @@ constexpr bool FLAG_support_il_printer = true;
 #else
 constexpr bool FLAG_support_il_printer = false;
 #endif  // defined(INCLUDE_IL_PRINTER)
+#if defined(DART_DYNAMIC_RUNTIME)
+#define ENABLE_INTERPRETER true
+#else
+#define ENABLE_INTERPRETER false
+#endif
+
+#if defined(DART_DYNAMIC_RUNTIME) || defined(DART_DYNAMIC_PRECOMPILER)
+#define USE_TABLE_DISPATCH false
+#else
+#define USE_TABLE_DISPATCH true
+#endif
 
 // List of VM-global (i.e. non-isolate specific) flags.
 //
@@ -102,6 +113,9 @@ constexpr bool FLAG_support_il_printer = false;
     "Collects all dynamic function names to identify unique targets")          \
   P(compactor_tasks, int, 2,                                                   \
     "The number of tasks to use for parallel compaction.")                     \
+  P(compilation_counter_threshold, int, 10,                                    \
+    "Function's usage-counter value before interpreted function is compiled, " \
+    "-1 means never")                                                          \
   P(concurrent_mark, bool, true, "Concurrent mark for old generation.")        \
   P(concurrent_sweep, bool, true, "Concurrent sweep for old generation.")      \
   C(deoptimize_alot, false, false, bool, false,                                \
@@ -184,7 +198,8 @@ constexpr bool FLAG_support_il_printer = false;
   P(reorder_basic_blocks, bool, true, "Reorder basic blocks")                  \
   C(stress_async_stacks, false, false, bool, false,                            \
     "Stress test async stack traces")                                          \
-  P(use_table_dispatch, bool, true, "Enable dispatch table based calls.")      \
+  P(use_table_dispatch, bool, USE_TABLE_DISPATCH,                              \
+    "Enable dispatch table based calls.")                                      \
   P(retain_function_objects, bool, true,                                       \
     "Serialize function objects for all code objects even if not otherwise "   \
     "needed in the precompiled runtime.")                                      \
@@ -245,6 +260,8 @@ constexpr bool FLAG_support_il_printer = false;
     "Enable magical pragmas for testing purposes. Use at your own risk!")      \
   R(eliminate_type_checks, true, bool, true,                                   \
     "Eliminate type checks when allowed by static type analysis.")             \
+  P(enable_interpreter, bool, ENABLE_INTERPRETER,                              \
+    "Enable interpreting kernel bytecode.")                                    \
   D(support_rr, bool, false, "Support running within RR.")                     \
   P(verify_entry_points, bool, false,                                          \
     "Throw API error on invalid member access throuh native API. See "         \

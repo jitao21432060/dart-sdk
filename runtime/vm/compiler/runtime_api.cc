@@ -988,6 +988,14 @@ word LocalVarDescriptors::InstanceSize() {
   return 0;
 }
 
+word Bytecode::NextFieldOffset() {
+  return -kWordSize;
+}
+
+word ParameterTypeCheck::NextFieldOffset() {
+  return -kWordSize;
+}
+
 word Integer::NextFieldOffset() {
   return TranslateOffsetInWords(dart::Integer::NextFieldOffset());
 }

@@ -5,9 +5,10 @@
 #ifndef RUNTIME_VM_KERNEL_LOADER_H_
 #define RUNTIME_VM_KERNEL_LOADER_H_
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 #include "vm/bit_vector.h"
+#include "vm/compiler/frontend/bytecode_reader.h"
 #include "vm/compiler/frontend/constant_reader.h"
 #include "vm/compiler/frontend/kernel_translation_helper.h"
 #include "vm/hash_map.h"
@@ -379,7 +380,9 @@ class KernelLoader : public ValueObject {
 
   Thread* thread_;
   Zone* zone_;
+#if !defined(DART_DYNAMIC_RUNTIME)
   NoActiveIsolateScope no_active_isolate_scope_;
+#endif
   Array& patch_classes_;
   ActiveClass active_class_;
   // This is the offset of the current library within
@@ -400,6 +403,9 @@ class KernelLoader : public ValueObject {
   ConstantReader constant_reader_;
   TypeTranslator type_translator_;
   InferredTypeMetadataHelper inferred_type_metadata_helper_;
+#if defined(DART_DYNAMIC_RUNTIME)
+  BytecodeMetadataHelper bytecode_metadata_helper_;
+#endif
 
   Class& external_name_class_;
   Field& external_name_field_;

@@ -5,11 +5,13 @@
 #ifndef RUNTIME_VM_COMPILER_FRONTEND_KERNEL_TRANSLATION_HELPER_H_
 #define RUNTIME_VM_COMPILER_FRONTEND_KERNEL_TRANSLATION_HELPER_H_
 
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
 #error "AOT runtime should not use compiler sources (including header files)"
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 
+#if !defined(DART_DYNAMIC_RUNTIME)
 #include "vm/compiler/backend/il.h"  // For CompileType.
+#endif
 #include "vm/kernel.h"
 #include "vm/kernel_binary.h"
 #include "vm/object.h"
@@ -198,6 +200,11 @@ class TranslationHelper {
                    const TokenPosition position,
                    const char* format,
                    ...) PRINTF_ATTRIBUTE(5, 6);
+
+  ArrayPtr GetBytecodeComponent() const { return info_.bytecode_component(); }
+  void SetBytecodeComponent(const Array& bytecode_component) {
+    info_.set_bytecode_component(bytecode_component);
+  }
 
   void SetExpressionEvaluationFunction(const Function& function) {
     ASSERT(expression_evaluation_function_ == nullptr);
@@ -979,7 +986,7 @@ struct InferredTypeMetadata {
   bool IsSkipCheck() const { return (flags & kFlagSkipCheck) != 0; }
   bool IsConstant() const { return (flags & kFlagConstant) != 0; }
   bool ReceiverNotInt() const { return (flags & kFlagReceiverNotInt) != 0; }
-
+#if !defined(DART_DYNAMIC_RUNTIME)
   CompileType ToCompileType(Zone* zone) const {
     if (IsInt() && cid == kDynamicCid) {
       return CompileType::FromAbstractType(
@@ -991,6 +998,7 @@ struct InferredTypeMetadata {
                          nullptr);
     }
   }
+#endif
 };
 
 // Helper class which provides access to inferred type metadata.
@@ -1284,6 +1292,8 @@ class KernelReaderHelper {
   // kernel program.
   intptr_t data_program_offset_;
 
+  friend class BytecodeMetadataHelper;
+  friend class BytecodeReaderHelper;
   friend class ClassHelper;
   friend class CallSiteAttributesMetadataHelper;
   friend class ConstantReader;

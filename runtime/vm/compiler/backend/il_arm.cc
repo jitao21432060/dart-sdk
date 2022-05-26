@@ -599,6 +599,10 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ LoadObject(R4, arguments_descriptor);
 
   ASSERT(locs()->in(0).reg() == R0);
+#if defined(DART_DYNAMIC_PRECOMPILER)
+  __ ldr(R2, compiler::FieldAddress(
+                 R0, compiler::target::Function::entry_point_offset()));
+#else
   if (FLAG_precompiled_mode) {
     // R0: Closure with a cached entry point.
     __ ldr(R2, compiler::FieldAddress(
@@ -611,6 +615,7 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     __ ldr(R2, compiler::FieldAddress(
                    R0, compiler::target::Function::entry_point_offset()));
   }
+#endif
 
   // R4: Arguments descriptor array.
   // R2: instructions entry point.

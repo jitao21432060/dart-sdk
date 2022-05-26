@@ -17,6 +17,8 @@ import 'package:crypto/crypto.dart';
 import 'package:front_end/src/api_prototype/language_version.dart'
     show uriUsesLegacyLanguageVersion;
 
+import 'package:front_end/src/fasta/kernel/utils.dart' show printComponentText;
+
 import 'package:front_end/src/api_unstable/vm.dart'
     show
         CompilerContext,
@@ -41,14 +43,28 @@ import 'package:front_end/src/api_unstable/vm.dart'
         resolveInputUri;
 
 import 'package:kernel/class_hierarchy.dart' show ClassHierarchy;
-import 'package:kernel/ast.dart' show Component, Library, Reference;
+import 'package:kernel/ast.dart'
+    show Class, Component, Field, Library, Reference, StaticGet, Supertype;
 import 'package:kernel/binary/ast_to_binary.dart' show BinaryPrinter;
 import 'package:kernel/core_types.dart' show CoreTypes;
 import 'package:kernel/kernel.dart' show loadComponentFromBinary;
+import 'package:kernel/library_index.dart';
+import 'package:kernel/target/targets.dart' show Target, TargetFlags, getTarget;
+import 'package:kernel/type_environment.dart';
+// import 'package:kernel/vm/constants_native_effects.dart' as vm_constants;
+import 'package:vm/transformations/type_flow/analysis.dart';
+import 'package:vm/dynamic_remover.dart';
+
 import 'package:kernel/target/targets.dart' show Target, TargetFlags, getTarget;
 import 'package:package_config/package_config.dart' show loadPackageConfigUri;
 
+import 'bytecode/bytecode_serialization.dart' show BytecodeSizeStatistics;
+import 'bytecode/gen_bytecode.dart'
+    show generateBytecode, createFreshComponentWithBytecode;
+import 'bytecode/options.dart' show BytecodeOptions;
 import 'http_filesystem.dart' show HttpAwareFileSystem;
+
+import 'keep_source/gen_keep_source.dart';
 import 'target/install.dart' show installAdditionalTargets;
 import 'transformations/devirtualization.dart' as devirtualization
     show transformComponent;
@@ -65,6 +81,12 @@ import 'transformations/unreachable_code_elimination.dart'
     as unreachable_code_elimination;
 import 'transformations/deferred_loading.dart' as deferred_loading;
 import 'transformations/to_string_transformer.dart' as to_string_transformer;
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:kernel/ast.dart';
+import 'metadata/inferred_type.dart';
+import 'package:kernel/src/printer.dart';
+// END
 
 /// Declare options consumed by [runCompiler].
 void declareCompilerOptions(ArgParser args) {
@@ -125,6 +147,14 @@ void declareCompilerOptions(ArgParser args) {
   args.addOption('data-dir',
       help: 'Name of the subdirectory of //data for output files');
   args.addOption('manifest', help: 'Path to output Fuchsia package manifest');
+  args.addFlag('gen-bytecode', help: 'Generate bytecode', defaultsTo: false);
+  args.addMultiOption('bytecode-options',
+      help: 'Specify options for bytecode generation:',
+      valueHelp: 'opt1,opt2,...',
+      allowed: BytecodeOptions.commandLineFlags.keys,
+      allowedHelp: BytecodeOptions.commandLineFlags);
+  args.addFlag('drop-ast',
+      help: 'Include only bytecode into the output file', defaultsTo: true);
   args.addMultiOption('enable-experiment',
       help: 'Comma separated list of experimental features to enable.');
   args.addFlag('help',
@@ -187,6 +217,8 @@ Future<int> runCompiler(ArgResults options, String usage) async {
   final bool rta = options['rta'];
   final bool linkPlatform = options['link-platform'];
   final bool embedSources = options['embed-sources'];
+  final bool genBytecode = options['gen-bytecode'];
+  final bool dropAST = options['drop-ast'];
   final bool enableAsserts = options['enable-asserts'];
   final bool? nullSafety = options['sound-null-safety'];
   final bool useProtobufTreeShakerV2 = options['protobuf-tree-shaker-v2'];
@@ -214,6 +246,13 @@ Future<int> runCompiler(ArgResults options, String usage) async {
       return badUsageExitCode;
     }
   }
+
+  final BytecodeOptions bytecodeOptions = new BytecodeOptions(
+    enableAsserts: enableAsserts,
+    emitSourceFiles: embedSources,
+    environmentDefines: environmentDefines,
+    aot: aot,
+  )..parseCommandLineFlags(options['bytecode-options']);
 
   final fileSystem =
       createFrontEndFileSystem(fileSystemScheme, fileSystemRoots);
@@ -276,6 +315,9 @@ Future<int> runCompiler(ArgResults options, String usage) async {
       useRapidTypeAnalysis: rta,
       environmentDefines: environmentDefines,
       enableAsserts: enableAsserts,
+      genBytecode: genBytecode,
+      bytecodeOptions: bytecodeOptions,
+      dropAST: dropAST && !splitOutputByPackages,
       useProtobufTreeShakerV2: useProtobufTreeShakerV2,
       minimalKernel: minimalKernel,
       treeShakeWriteOnlyFields: treeShakeWriteOnlyFields,
@@ -288,11 +330,19 @@ Future<int> runCompiler(ArgResults options, String usage) async {
     return compileTimeErrorExitCode;
   }
 
+  if (bytecodeOptions.showBytecodeSizeStatistics && !splitOutputByPackages) {
+    BytecodeSizeStatistics.reset();
+  }
+
   final IOSink sink = new File(outputFileName).openWrite();
   final BinaryPrinter printer = new BinaryPrinter(sink,
       libraryFilter: (lib) => !results.loadedLibraries.contains(lib));
   printer.writeComponentFile(component);
   await sink.close();
+
+  if (bytecodeOptions.showBytecodeSizeStatistics && !splitOutputByPackages) {
+    BytecodeSizeStatistics.dump();
+  }
 
   if (depfile != null) {
     await writeDepfile(
@@ -305,6 +355,9 @@ Future<int> runCompiler(ArgResults options, String usage) async {
       compilerOptions,
       results,
       outputFileName,
+      genBytecode: genBytecode,
+      bytecodeOptions: bytecodeOptions,
+      dropAST: dropAST,
     );
   }
 
@@ -345,6 +398,9 @@ Future<KernelCompilationResults> compileToKernel(
     bool useRapidTypeAnalysis: true,
     required Map<String, String> environmentDefines,
     bool enableAsserts: true,
+    bool genBytecode: false,
+    BytecodeOptions? bytecodeOptions,
+    bool dropAST: false,
     bool useProtobufTreeShakerV2: false,
     bool minimalKernel: false,
     bool treeShakeWriteOnlyFields: false,
@@ -363,10 +419,19 @@ Future<KernelCompilationResults> compileToKernel(
     compilerResult =
         await loadKernel(options.fileSystem, resolveInputUri(fromDillFile));
   } else {
-    compilerResult = await kernelForProgram(source, options);
+//    compilerResult = await kernelForProgram(source, options);
+    print("aot: ${aot}");
+    compilerResult = await compile(source, options, aot,
+        enableAsserts: enableAsserts,
+        useGlobalTypeFlowAnalysis: useGlobalTypeFlowAnalysis,
+        useProtobufTreeShakerV2: useProtobufTreeShakerV2,
+        minimalKernel: minimalKernel,
+        treeShakeWriteOnlyFields: treeShakeWriteOnlyFields);
   }
-  final Component? component = compilerResult?.component;
+  Component? component = compilerResult?.component;
   Iterable<Uri>? compiledSources = component?.uriToSource.keys;
+
+//  HookTransformer(null).transform(component);
 
   Set<Library> loadedLibraries = createLoadedLibrariesSet(
       compilerResult?.loadedComponents, compilerResult?.sdkComponent,
@@ -379,11 +444,18 @@ Future<KernelCompilationResults> compileToKernel(
 
   // Run global transformations only if component is correct.
   if ((aot || minimalKernel) && component != null) {
-    await runGlobalTransformations(target, component, useGlobalTypeFlowAnalysis,
-        enableAsserts, useProtobufTreeShakerV2, errorDetector,
-        minimalKernel: minimalKernel,
-        treeShakeWriteOnlyFields: treeShakeWriteOnlyFields,
-        useRapidTypeAnalysis: useRapidTypeAnalysis);
+    await runGlobalTransformations(
+      target, component, useGlobalTypeFlowAnalysis,
+      enableAsserts, useProtobufTreeShakerV2, errorDetector,
+      minimalKernel: minimalKernel,
+      treeShakeWriteOnlyFields: treeShakeWriteOnlyFields,
+      useRapidTypeAnalysis: useRapidTypeAnalysis,
+      // BD ADD: START
+      dynamicart: options.dynamicart || options.dynamicdill,
+      hostDillComponent: options.hostDillComponent,
+      hotUpdateHostDillComponent: options.hotUpdateHostDillComponent,
+      // END
+    );
 
     if (minimalKernel) {
       // compiledSources is component.uriToSource.keys.
@@ -393,6 +465,33 @@ Future<KernelCompilationResults> compileToKernel(
 
       component.metadata.clear();
       component.uriToSource.clear();
+    }
+  }
+
+  // BD ADD STATR:
+  if (options.dynamicdill && options.hotUpdate) {
+    diffDill(options, component!);
+  }
+  // END
+
+  if (genBytecode && !errorDetector.hasCompilationErrors && component != null) {
+    List<Library> libraries = new List<Library>.empty();
+    for (Library library in component.libraries) {
+      if (loadedLibraries.contains(library)) continue;
+      libraries.add(library);
+    }
+
+    await runWithFrontEndCompilerContext(source, options, component, () {
+      generateBytecode(component!,
+          libraries: libraries,
+          hierarchy: compilerResult?.classHierarchy,
+          coreTypes: compilerResult?.coreTypes,
+          options: bytecodeOptions);
+      throw ("1.13:should note be here =====cjj");
+    });
+
+    if (dropAST) {
+      component = createFreshComponentWithBytecode(component);
     }
   }
 
@@ -433,15 +532,21 @@ Set<Library> createLoadedLibrariesSet(
 }
 
 Future runGlobalTransformations(
-    Target target,
-    Component component,
-    bool useGlobalTypeFlowAnalysis,
-    bool enableAsserts,
-    bool useProtobufTreeShakerV2,
-    ErrorDetector errorDetector,
-    {bool minimalKernel: false,
-    bool treeShakeWriteOnlyFields: false,
-    bool useRapidTypeAnalysis: true}) async {
+  Target target,
+  Component component,
+  bool useGlobalTypeFlowAnalysis,
+  bool enableAsserts,
+  bool useProtobufTreeShakerV2,
+  ErrorDetector errorDetector, {
+  bool minimalKernel: false,
+  bool treeShakeWriteOnlyFields: false,
+  bool useRapidTypeAnalysis: true,
+  // BD ADD: START
+  bool dynamicart: false,
+  Component? hostDillComponent: null,
+  Component? hotUpdateHostDillComponent: null,
+  // END
+}) async {
   if (errorDetector.hasCompilationErrors) return;
 
   final coreTypes = new CoreTypes(component);
@@ -452,7 +557,11 @@ Future runGlobalTransformations(
   // can benefit from mixin de-duplication.
   // At least, in addition to VM/AOT case we should run this transformation
   // when building a platform dill file for VM/JIT case.
-  mixin_deduplication.transformComponent(component);
+  // BD MOD: START
+  mixin_deduplication.transformComponent(component,
+      hostDillComponent: hostDillComponent,
+      hotUpdateHostDillComponent: hotUpdateHostDillComponent);
+  // END
 
   // Unreachable code elimination transformation should be performed
   // before type flow analysis so TFA won't take unreachable code into account.
@@ -460,8 +569,8 @@ Future runGlobalTransformations(
 
   if (useGlobalTypeFlowAnalysis) {
     globalTypeFlow.transformComponent(target, coreTypes, component,
-        treeShakeSignatures: !minimalKernel,
-        treeShakeWriteOnlyFields: treeShakeWriteOnlyFields,
+        treeShakeSignatures: dynamicart ? false : !minimalKernel,
+        treeShakeWriteOnlyFields: dynamicart ? false : treeShakeWriteOnlyFields,
         treeShakeProtobufs: useProtobufTreeShakerV2,
         useRapidTypeAnalysis: useRapidTypeAnalysis);
   } else {
@@ -649,8 +758,25 @@ Future<Uri> convertToPackageUri(
 /// Write a separate kernel binary for each package. The name of the
 /// output kernel binary is '[outputFileName]-$package.dilp'.
 /// The list of package names is written into a file '[outputFileName]-packages'.
-Future writeOutputSplitByPackages(Uri source, CompilerOptions compilerOptions,
-    KernelCompilationResults compilationResults, String outputFileName) async {
+///
+/// Generates bytecode for each package if requested.
+Future writeOutputSplitByPackages(
+  Uri source,
+  CompilerOptions compilerOptions,
+  KernelCompilationResults compilationResults,
+  String outputFileName, {
+  bool genBytecode: false,
+  required BytecodeOptions bytecodeOptions,
+  bool dropAST: false,
+}) async {
+  if (bytecodeOptions.showBytecodeSizeStatistics) {
+    BytecodeSizeStatistics.reset();
+  }
+
+  // final packages = new List<String>();
+  // await runWithFrontEndCompilerContext(
+  //     source, compilerOptions, compilationResults.component, () async {
+
   final packages = <String>[];
   final Component component = compilationResults.component!;
   await runWithFrontEndCompilerContext(source, compilerOptions, component,
@@ -663,6 +789,19 @@ Future writeOutputSplitByPackages(Uri source, CompilerOptions compilerOptions,
       final String filename = '$outputFileName-$package.dilp';
       final IOSink sink = new File(filename).openWrite();
 
+      Component partComponent = compilationResults.component!;
+      if (genBytecode) {
+        generateBytecode(partComponent,
+            options: bytecodeOptions,
+            libraries: libraries,
+            hierarchy: compilationResults.classHierarchy,
+            coreTypes: compilationResults.coreTypes);
+
+        if (dropAST) {
+          partComponent = createFreshComponentWithBytecode(partComponent);
+        }
+      }
+
       final BinaryPrinter printer = new BinaryPrinter(sink,
           libraryFilter: (lib) =>
               packageFor(lib, compilationResults.loadedLibraries) == package);
@@ -671,6 +810,10 @@ Future writeOutputSplitByPackages(Uri source, CompilerOptions compilerOptions,
       await sink.close();
     }, mainFirst: false);
   });
+
+  if (bytecodeOptions.showBytecodeSizeStatistics) {
+    BytecodeSizeStatistics.dump();
+  }
 
   final IOSink packagesList = new File('$outputFileName-packages').openWrite();
   for (String package in packages) {
@@ -843,6 +986,214 @@ Future<CompilerResult> loadKernel(
       (await asFileUri(fileSystem, dillFileUri)).toFilePath());
   return CompilerResultLoadedFromKernel(component);
 }
+
+// BD ADD STATR:
+void diffDill(CompilerOptions options, Component component) {
+  print("begin diff dill");
+  LibraryIndex? hostIndexer = null;
+  if (options.hotUpdateHostDillComponent != null) {
+    hostIndexer = LibraryIndex.all(options.hotUpdateHostDillComponent!);
+  }
+  StringBuffer content = StringBuffer();
+  String getDisambiguatedName(Member member) {
+    if (member is Procedure) {
+      if (member.isGetter) return LibraryIndex.getterPrefix + member.name.text;
+      if (member.isSetter) return LibraryIndex.setterPrefix + member.name.text;
+    }
+    return member.name.text;
+  }
+
+  var trimSource = (str) {
+    str = str.replaceAll("\n", "");
+    str = str.replaceAll(" ", "");
+    return str;
+  };
+
+  bool checkEqual(Member hostProcedure, Member procedure) {
+    String hostStr = "";
+    if (hostProcedure.fileEndOffset != -1) {
+      hostStr = utf8
+          .decode(options.hotUpdateHostDillComponent!
+              .uriToSource[hostProcedure.fileUri]!.source)
+          .substring(hostProcedure.fileOffset, hostProcedure.fileEndOffset);
+    }
+
+    String str = "";
+    if (procedure.fileEndOffset != -1) {
+      str = utf8
+          .decode(component.uriToSource[procedure.fileUri]!.source)
+          .substring(procedure.fileOffset, procedure.fileEndOffset);
+    }
+    if (trimSource(hostStr) != trimSource(str)) {
+      return false;
+    }
+    if (toB) {
+      return true;
+    }
+    hostStr = FunctionParametersMetaWriter(
+            hostProcedure.function!,
+            options.hotUpdateHostDillComponent?.metadata
+                as Map<String, MetadataRepository<Object>>)
+        .toString();
+    str = FunctionParametersMetaWriter(procedure.function!,
+            component.metadata as Map<String, MetadataRepository<Object>>)
+        .toString();
+    bool res = trimSource(hostStr) == trimSource(str);
+    if (!res) {
+      print("===${procedure}");
+      print(hostStr);
+      print(str);
+    }
+    return res;
+  }
+
+  component.libraries.forEach((lib) {
+    if (!toB && !isDynamicLib(lib, options)) {
+      return;
+    }
+    bool isLibLoaded = true;
+    lib.procedures.forEach((procedure) {
+      String pname = getDisambiguatedName(procedure);
+      Member? member = hostIndexer?.tryGetTopLevelMember(
+          lib.importUri.toString(), LibraryIndex.topLevel, pname);
+      if (member == null) {
+        isLibLoaded = false;
+      } else if (!checkEqual(member, procedure)) {
+        isLibLoaded = false;
+        String pageKey =
+            "${procedure.enclosingLibrary.importUri}#${LibraryIndex.topLevel}#${pname}";
+        content.writeln(pageKey);
+      }
+    });
+
+    lib.classes.forEach((clz) {
+      Class? member =
+          hostIndexer?.tryGetClass(lib.importUri.toString(), clz.name);
+      if (member == null) {
+        isLibLoaded = false;
+      }
+      clz.constructors.forEach((constructor) {
+        String pname = getDisambiguatedName(constructor);
+        Member? member = hostIndexer?.tryGetMember(
+            lib.importUri.toString(), clz.name, pname);
+        if (member == null) {
+          isLibLoaded = false;
+        } else if (!checkEqual(member, constructor)) {
+          isLibLoaded = false;
+          if (pname.isEmpty) {
+            pname = clz.name;
+          } else {
+            pname = "${clz.name}.${pname}";
+          }
+          String pageKey =
+              "${constructor.enclosingLibrary.importUri}#${constructor.enclosingClass.name}#${pname}";
+          content.writeln(pageKey);
+        }
+      });
+      clz.procedures.forEach((procedure) {
+        String pname = getDisambiguatedName(procedure);
+        Member? member = hostIndexer?.tryGetMember(
+            lib.importUri.toString(), clz.name, pname);
+        if (member == null) {
+          isLibLoaded = false;
+        } else if (!checkEqual(member, procedure)) {
+          isLibLoaded = false;
+          String pageKey =
+              "${procedure.enclosingLibrary.importUri}#${procedure.enclosingClass?.name}#${pname}";
+          content.writeln(pageKey);
+        }
+      });
+    });
+
+    if (isLibLoaded && hostIndexer != null) {
+      options.hotUpdateHostLoadedLibs.add(lib.importUri.toString());
+    }
+  });
+
+  print("fix method:\n${content}");
+  if (options.hotUpdateFile != null) {
+    File tmpFile = File(options.hotUpdateFile!);
+    tmpFile.writeAsStringSync(content.toString());
+  }
+
+  print("end diff dill");
+}
+
+const AstTextStrategy astTextStrategy = const AstTextStrategy();
+
+class FunctionParametersMetaWriter {
+  final FunctionNode function;
+  final Map<String, MetadataRepository<Object>> metadata;
+  late StringBuffer sb;
+  FunctionParametersMetaWriter(this.function, this.metadata) {
+    sb = StringBuffer();
+  }
+  void writeList<T>(Iterable<T> nodes, void callback(T x),
+      {String separator: ','}) {
+    bool first = true;
+    for (var node in nodes) {
+      if (first) {
+        first = false;
+      } else {
+        sb.write(separator);
+      }
+      callback(node);
+    }
+  }
+
+  void writeMetadata(VariableDeclaration node) {
+    if (node.name!.contains("creationLocation")) {
+      return;
+    }
+    if (metadata != null) {
+      for (var md in metadata.values) {
+        final nodeMetadata = md.mapping[node];
+        if (nodeMetadata != null && nodeMetadata is InferredType) {
+          InferredType it = nodeMetadata as InferredType;
+          sb.write("[@${md.tag}=${it.toString2()}]");
+        }
+      }
+    }
+  }
+
+  void writeVariableDeclaration(VariableDeclaration node,
+      {bool useVarKeyword: false}) {
+    writeMetadata(node);
+  }
+
+  void writeParameterList(List<VariableDeclaration> positional,
+      List<VariableDeclaration> named, int requiredParameterCount) {
+    StringBuffer sb = StringBuffer();
+    sb.write('(');
+    writeList(
+        positional.take(requiredParameterCount), writeVariableDeclaration);
+    if (requiredParameterCount < positional.length) {
+      if (requiredParameterCount > 0) {
+        sb.write(',');
+      }
+      sb.write('[');
+      writeList(
+          positional.skip(requiredParameterCount), writeVariableDeclaration);
+      sb.write(']');
+    }
+    if (named.isNotEmpty) {
+      if (positional.isNotEmpty) {
+        sb.write(',');
+      }
+      sb.write('{');
+      writeList(named, writeVariableDeclaration);
+      sb.write('}');
+    }
+    sb.write(')');
+  }
+
+  String toString() {
+    writeParameterList(function.positionalParameters, function.namedParameters,
+        function.requiredParameterCount);
+    return sb.toString();
+  }
+}
+// END
 
 // Used by kernel_front_end_test.dart
 main() {}

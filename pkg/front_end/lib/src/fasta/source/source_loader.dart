@@ -55,7 +55,11 @@ import '../builder/type_builder.dart';
 import '../builder/type_declaration_builder.dart';
 import '../crash.dart' show firstSourceUri;
 import '../denylisted_classes.dart'
-    show denylistedCoreClasses, denylistedTypedDataClasses;
+    show
+        denylistedCoreClasses,
+        denylistedCoreClassesDynamicart,
+        denylistedTypedDataClasses,
+        denylistedTypedDataClassesDynamicart;
 import '../export.dart' show Export;
 import '../fasta_codes.dart';
 import '../kernel/body_builder.dart' show BodyBuilder;
@@ -1569,19 +1573,38 @@ severity: $severity
   /// errors. Recover by breaking the cycles. This means that the rest of the
   /// pipeline (including backends) can assume that there are no hierarchy
   /// cycles.
-  List<SourceClassBuilder> handleHierarchyCycles(ClassBuilder objectClass) {
+  List<SourceClassBuilder> handleHierarchyCycles(ClassBuilder objectClass,
+      {bool? dynamicart}) {
     Set<ClassBuilder> denyListedClasses = new Set<ClassBuilder>();
-    for (int i = 0; i < denylistedCoreClasses.length; i++) {
-      denyListedClasses.add(coreLibrary.lookupLocalMember(
-          denylistedCoreClasses[i],
-          required: true) as ClassBuilder);
-    }
-    if (typedDataLibrary != null) {
-      for (int i = 0; i < denylistedTypedDataClasses.length; i++) {
-        // Allow the member to not exist. If it doesn't, nobody can extend it.
-        Builder? member = typedDataLibrary!
-            .lookupLocalMember(denylistedTypedDataClasses[i], required: false);
-        if (member != null) denyListedClasses.add(member as ClassBuilder);
+    if (dynamicart != null && dynamicart) {
+      for (int i = 0; i < denylistedCoreClassesDynamicart.length; i++) {
+        denyListedClasses.add(coreLibrary.lookupLocalMember(
+            denylistedCoreClassesDynamicart[i],
+            required: true) as ClassBuilder);
+      }
+      if (typedDataLibrary != null) {
+        for (int i = 0; i < denylistedTypedDataClassesDynamicart.length; i++) {
+          // Allow the member to not exist. If it doesn't, nobody can extend it.
+          Builder? member = typedDataLibrary!.lookupLocalMember(
+              denylistedTypedDataClassesDynamicart[i],
+              required: false);
+          if (member != null) denyListedClasses.add(member as ClassBuilder);
+        }
+      }
+    } else {
+      for (int i = 0; i < denylistedCoreClasses.length; i++) {
+        denyListedClasses.add(coreLibrary.lookupLocalMember(
+            denylistedCoreClasses[i],
+            required: true) as ClassBuilder);
+      }
+      if (typedDataLibrary != null) {
+        for (int i = 0; i < denylistedTypedDataClasses.length; i++) {
+          // Allow the member to not exist. If it doesn't, nobody can extend it.
+          Builder? member = typedDataLibrary!.lookupLocalMember(
+              denylistedTypedDataClasses[i],
+              required: false);
+          if (member != null) denyListedClasses.add(member as ClassBuilder);
+        }
       }
     }
 
@@ -1725,9 +1748,10 @@ severity: $severity
     }
   }
 
-  List<SourceClassBuilder> checkSemantics(ClassBuilder objectClass) {
+  List<SourceClassBuilder> checkSemantics(ClassBuilder objectClass,
+      {bool? dynamicart}) {
     checkObjectClassHierarchy(objectClass);
-    return handleHierarchyCycles(objectClass);
+    return handleHierarchyCycles(objectClass, dynamicart: dynamicart);
   }
 
   /// Builds the core AST structure needed for the outline of the component.

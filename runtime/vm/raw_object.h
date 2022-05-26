@@ -130,6 +130,8 @@ enum TypedDataElementType {
   friend class object;                                                         \
   friend class UntaggedObject;                                                 \
   friend class Heap;                                                           \
+  friend class Interpreter;                                                    \
+  friend class InterpreterHelpers;                                             \
   friend class Simulator;                                                      \
   friend class SimulatorHelpers;                                               \
   friend class OffsetsTable;                                                   \
@@ -760,6 +762,8 @@ class UntaggedObject {
   friend class Instance;                // StorePointer
   friend class StackFrame;              // GetCodeObject assertion.
   friend class CodeLookupTableBuilder;  // profiler
+  friend class Interpreter;
+  friend class InterpreterHelpers;
   friend class Simulator;
   friend class SimulatorHelpers;
   friend class ObjectLocator;
@@ -965,14 +969,15 @@ class UntaggedClass : public UntaggedObject {
   // Cache for dispatcher functions.
   COMPRESSED_POINTER_FIELD(ArrayPtr, invocation_dispatcher_cache)
 
-#if !defined(PRODUCT) || !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(PRODUCT) || !defined(DART_PRECOMPILED_RUNTIME) || \
+    defined(DART_DYNAMIC_RUNTIME)
   // Array of Class.
   COMPRESSED_POINTER_FIELD(GrowableObjectArrayPtr, direct_implementors)
   // Array of Class.
   COMPRESSED_POINTER_FIELD(GrowableObjectArrayPtr, direct_subclasses)
 #endif  // !defined(PRODUCT) || !defined(DART_PRECOMPILED_RUNTIME)
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
   // Stub code for allocation of instances.
   COMPRESSED_POINTER_FIELD(CodePtr, allocation_stub)
   // CHA optimized codes.
@@ -980,11 +985,17 @@ class UntaggedClass : public UntaggedObject {
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
 #if defined(DART_PRECOMPILED_RUNTIME)
+
+#if defined(DART_DYNAMIC_RUNTIME)
+  VISIT_TO(direct_subclasses)
+#else
 #if defined(PRODUCT)
   VISIT_TO(invocation_dispatcher_cache)
 #else
   VISIT_TO(direct_subclasses)
 #endif  // defined(PRODUCT)
+#endif
+
 #else
   VISIT_TO(dependent_code)
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
@@ -1015,8 +1026,8 @@ class UntaggedClass : public UntaggedObject {
     return NULL;
   }
 
-  NOT_IN_PRECOMPILED(TokenPosition token_pos_);
-  NOT_IN_PRECOMPILED(TokenPosition end_token_pos_);
+  NOT_IN_PRECOMPILED_IN_DYNAMIC(TokenPosition token_pos_);
+  NOT_IN_PRECOMPILED_IN_DYNAMIC(TokenPosition end_token_pos_);
 
   classid_t id_;                // Class Id, also index in the class table.
   int16_t num_type_arguments_;  // Number of type arguments in flattened vector.
@@ -1043,7 +1054,9 @@ class UntaggedClass : public UntaggedObject {
   int32_t target_next_field_offset_in_words_;
 #endif  // defined(DART_PRECOMPILER)
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  typedef BitField<uint32_t, bool, 0, 1> IsDeclaredInBytecode;
+  typedef BitField<uint32_t, uint32_t, 1, 31> BinaryDeclarationOffset;
   uint32_t kernel_offset_;
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
@@ -1273,14 +1286,23 @@ class UntaggedFunction : public UntaggedObject {
   COMPRESSED_POINTER_FIELD(ArrayPtr, ic_data_array);
   // Currently active code. Accessed from generated code.
   COMPRESSED_POINTER_FIELD(CodePtr, code);
-#if defined(DART_PRECOMPILED_RUNTIME)
+
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  COMPRESSED_POINTER_FIELD(BytecodePtr, bytecode);
+#endif
+
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   VISIT_TO(code);
 #else
   // Positional parameter names are not needed in the AOT runtime.
   COMPRESSED_POINTER_FIELD(ArrayPtr, positional_parameter_names);
   // Unoptimized code, keep it after optimization.
   COMPRESSED_POINTER_FIELD(CodePtr, unoptimized_code);
+#if defined(DART_DYNAMIC_RUNTIME)
+  VISIT_TO(bytecode);
+#else
   VISIT_TO(unoptimized_code);
+#endif
 
   UnboxedParameterBitmap unboxed_parameters_info_;
   TokenPosition token_pos_;
@@ -1297,7 +1319,9 @@ class UntaggedFunction : public UntaggedObject {
   F(intptr_t, int8_t, state_bits)                                              \
   F(int, int8_t, inlining_depth)
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  typedef BitField<uint32_t, bool, 0, 1> IsDeclaredInBytecode;
+  typedef BitField<uint32_t, uint32_t, 1, 31> BinaryDeclarationOffset;
   uint32_t kernel_offset_;
 
 #define DECLARE(return_type, type, name) type name##_;
@@ -1413,7 +1437,7 @@ class UntaggedField : public UntaggedObject {
     UNREACHABLE();
     return NULL;
   }
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   VISIT_TO(dependent_code);
 #else
   // For type test in implicit setter.
@@ -1426,7 +1450,9 @@ class UntaggedField : public UntaggedObject {
   ClassIdTagType is_nullable_;  // kNullCid if field can contain null value and
                                 // kIllegalCid otherwise.
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  typedef BitField<uint32_t, bool, 0, 1> IsDeclaredInBytecode;
+  typedef BitField<uint32_t, uint32_t, 1, 31> BinaryDeclarationOffset;
   uint32_t kernel_offset_;
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
@@ -1495,7 +1521,7 @@ class alignas(8) UntaggedScript : public UntaggedObject {
   int64_t load_timestamp_;
 #endif
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
   int32_t flags_and_max_position_;
 
  public:
@@ -1553,6 +1579,8 @@ class UntaggedLibrary : public UntaggedObject {
   // Metadata on classes, methods etc.
   COMPRESSED_POINTER_FIELD(ArrayPtr, metadata)
   // Class containing top-level elements.
+  POINTER_FIELD(ArrayPtr, metadata_inter)
+  // Metadata on classes, methods etc.
   COMPRESSED_POINTER_FIELD(ClassPtr, toplevel_class)
   COMPRESSED_POINTER_FIELD(GrowableObjectArrayPtr, used_scripts)
   COMPRESSED_POINTER_FIELD(LoadingUnitPtr, loading_unit)
@@ -1594,7 +1622,9 @@ class UntaggedLibrary : public UntaggedObject {
   int8_t load_state_;     // Of type LibraryState.
   uint8_t flags_;         // BitField for LibraryFlags.
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  typedef BitField<uint32_t, bool, 0, 1> IsDeclaredInBytecode;
+  typedef BitField<uint32_t, uint32_t, 1, 31> BinaryDeclarationOffset;
   uint32_t kernel_offset_;
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
@@ -1642,6 +1672,7 @@ class UntaggedKernelProgramInfo : public UntaggedObject {
   COMPRESSED_POINTER_FIELD(ExternalTypedDataPtr, metadata_mappings)
   COMPRESSED_POINTER_FIELD(ArrayPtr, scripts)
   COMPRESSED_POINTER_FIELD(ArrayPtr, constants)
+  COMPRESSED_POINTER_FIELD(ArrayPtr, bytecode_component)
   COMPRESSED_POINTER_FIELD(GrowableObjectArrayPtr, potential_natives)
   COMPRESSED_POINTER_FIELD(GrowableObjectArrayPtr, potential_pragma_functions)
   COMPRESSED_POINTER_FIELD(ExternalTypedDataPtr, constants_table)
@@ -1780,6 +1811,39 @@ class UntaggedCode : public UntaggedObject {
   friend class UnitSerializationRoots;
   friend class UnitDeserializationRoots;
   friend class CallSiteResetter;
+};
+
+class UntaggedBytecode : public UntaggedObject {
+  RAW_HEAP_OBJECT_IMPLEMENTATION(Bytecode);
+
+  uword instructions_;
+  intptr_t instructions_size_;
+
+  POINTER_FIELD(ObjectPoolPtr, object_pool)
+  VISIT_FROM(object_pool);
+  POINTER_FIELD(FunctionPtr, function)
+  POINTER_FIELD(ArrayPtr, closures)
+  POINTER_FIELD(ExceptionHandlersPtr, exception_handlers)
+  POINTER_FIELD(PcDescriptorsPtr, pc_descriptors)
+  NOT_IN_PRODUCT(POINTER_FIELD(LocalVarDescriptorsPtr, var_descriptors));
+#if defined(PRODUCT)
+  VISIT_TO(pc_descriptors);
+#else
+  VISIT_TO(var_descriptors);
+#endif
+
+  ObjectPtr* to_snapshot(Snapshot::Kind kind) {
+    return reinterpret_cast<ObjectPtr*>(&pc_descriptors_);
+  }
+
+  int32_t instructions_binary_offset_;
+  int32_t source_positions_binary_offset_;
+  int32_t local_variables_binary_offset_;
+
+  static bool ContainsPC(ObjectPtr raw_obj, uword pc);
+
+  friend class Function;
+  friend class StackFrame;
 };
 
 class UntaggedObjectPool : public UntaggedObject {
@@ -2300,6 +2364,19 @@ class UntaggedSentinel : public UntaggedObject {
   VISIT_NOTHING();
 };
 
+class UntaggedParameterTypeCheck : public UntaggedObject {
+  RAW_HEAP_OBJECT_IMPLEMENTATION(ParameterTypeCheck);
+  intptr_t index_;
+
+  POINTER_FIELD(AbstractTypePtr, param)
+  VISIT_FROM(param);
+  POINTER_FIELD(AbstractTypePtr, type_or_bound)
+  POINTER_FIELD(StringPtr, name)
+  POINTER_FIELD(SubtypeTestCachePtr, cache)
+  VISIT_TO(cache);
+  ObjectPtr* to_snapshot(Snapshot::Kind kind) { return to(); }
+};
+
 class UntaggedSingleTargetCache : public UntaggedObject {
   RAW_HEAP_OBJECT_IMPLEMENTATION(SingleTargetCache);
   POINTER_FIELD(CodePtr, target)
@@ -2343,7 +2420,10 @@ class UntaggedICData : public UntaggedCallSiteData {
   RAW_HEAP_OBJECT_IMPLEMENTATION(ICData);
   POINTER_FIELD(ArrayPtr, entries)  // Contains class-ids, target and count.
   // Static type of the receiver, if instance call and available.
-  NOT_IN_PRECOMPILED(POINTER_FIELD(AbstractTypePtr, receivers_static_type))
+
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+POINTER_FIELD(AbstractTypePtr, receivers_static_type);
+#endif
   POINTER_FIELD(ObjectPtr,
                 owner)  // Parent/calling function or original IC of cloned IC.
   VISIT_TO(owner)
@@ -3122,6 +3202,8 @@ COMPILE_ASSERT(sizeof(UntaggedFloat64x2) == 24);
 
 class UntaggedExternalTypedData : public UntaggedTypedDataBase {
   RAW_HEAP_OBJECT_IMPLEMENTATION(ExternalTypedData);
+
+  friend class UntaggedBytecode;
 };
 
 class UntaggedPointer : public UntaggedPointerBase {

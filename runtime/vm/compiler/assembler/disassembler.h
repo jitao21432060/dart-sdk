@@ -61,6 +61,7 @@ class DisassembleToStdout : public DisassemblyFormatter {
   DISALLOW_COPY_AND_ASSIGN(DisassembleToStdout);
 };
 
+#if !defined(DART_DYNAMIC_RUNTIME)
 // Disassemble into a JSONStream.
 class DisassembleToJSONStream : public DisassemblyFormatter {
  public:
@@ -82,6 +83,7 @@ class DisassembleToJSONStream : public DisassemblyFormatter {
   DISALLOW_ALLOCATION();
   DISALLOW_COPY_AND_ASSIGN(DisassembleToJSONStream);
 };
+#endif
 
 #if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
 // Basic disassembly formatter that outputs the disassembled instruction

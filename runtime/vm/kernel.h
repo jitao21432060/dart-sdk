@@ -31,7 +31,8 @@ class NameIndex {
 }  // namespace kernel
 }  // namespace dart
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+
 namespace dart {
 
 class BitVector;

@@ -10826,6 +10826,8 @@ abstract class DartType extends Node {
 
   @override
   void toTextInternal(AstPrinter printer);
+
+  String bdToString();
 }
 
 /// The type arising from invalid type annotations.
@@ -10878,6 +10880,10 @@ class InvalidType extends DartType {
   void toTextInternal(AstPrinter printer) {
     printer.write("<invalid>");
   }
+
+  String bdToString() {
+    return "${toStringInternal()}";
+  }
 }
 
 class DynamicType extends DartType {
@@ -10920,6 +10926,10 @@ class DynamicType extends DartType {
   void toTextInternal(AstPrinter printer) {
     printer.write("dynamic");
   }
+
+  String bdToString() {
+    return "${toStringInternal()}";
+  }
 }
 
 class VoidType extends DartType {
@@ -10961,6 +10971,10 @@ class VoidType extends DartType {
   @override
   void toTextInternal(AstPrinter printer) {
     printer.write("void");
+  }
+
+  String bdToString() {
+    return "${toStringInternal()}";
   }
 }
 
@@ -11033,6 +11047,10 @@ class NeverType extends DartType {
     printer.write("Never");
     printer.write(nullabilityToString(declaredNullability));
   }
+
+  String bdToString() {
+    return "${toStringInternal()}";
+  }
 }
 
 class NullType extends DartType {
@@ -11075,6 +11093,10 @@ class NullType extends DartType {
   @override
   void toTextInternal(AstPrinter printer) {
     printer.write("Null");
+  }
+
+  String bdToString() {
+    return "${toStringInternal()}";
   }
 }
 
@@ -11178,6 +11200,10 @@ class InterfaceType extends DartType {
     printer.writeClassName(className, forType: true);
     printer.writeTypeArguments(typeArguments);
     printer.write(nullabilityToString(declaredNullability));
+  }
+
+  String bdToString() {
+    return "${toStringInternal()}";
   }
 }
 
@@ -11394,6 +11420,10 @@ class FunctionType extends DartType {
     printer.write(")");
     printer.write(nullabilityToString(declaredNullability));
   }
+
+  String bdToString() {
+    return "${toStringInternal()}";
+  }
 }
 
 /// A use of a [Typedef] as a type.
@@ -11500,6 +11530,10 @@ class TypedefType extends DartType {
     printer.writeTypeArguments(typeArguments);
     printer.write(nullabilityToString(declaredNullability));
   }
+
+  String bdToString() {
+    return "${toStringInternal()}";
+  }
 }
 
 class FutureOrType extends DartType {
@@ -11573,6 +11607,10 @@ class FutureOrType extends DartType {
     printer.writeType(typeArgument);
     printer.write(">");
     printer.write(nullabilityToString(declaredNullability));
+  }
+
+  String bdToString() {
+    return "${toStringInternal()}";
   }
 }
 
@@ -11690,6 +11728,10 @@ class ExtensionType extends DartType {
     printer.writeExtensionName(extensionReference);
     printer.writeTypeArguments(typeArguments);
     printer.write(nullabilityToString(declaredNullability));
+  }
+
+  String bdToString() {
+    return "${toStringInternal()}";
   }
 }
 
@@ -12219,6 +12261,10 @@ class TypeParameterType extends DartType {
       printer.writeTypeParameterName(parameter);
       printer.write(nullabilityToString(declaredNullability));
     }
+  }
+
+  String bdToString() {
+    return "${toStringInternal()}";
   }
 }
 

@@ -188,6 +188,8 @@ class ProcessedOptions {
 
   bool get enableUnscheduledExperiments => _raw.enableUnscheduledExperiments;
 
+  bool get dynamicart => _raw.dynamicart;
+
   /// The entry-points provided to the compiler.
   final List<Uri> inputs;
 
@@ -349,6 +351,9 @@ class ProcessedOptions {
   /// Clear the file system so any CompilerOptions fileSystem change will have
   /// effect.
   void clearFileSystemCache() => _fileSystem = null;
+
+  /// Whether to generate bytecode.
+  bool get bytecode => _raw.bytecode;
 
   /// Whether to write a file (e.g. a dill file) when reporting a crash.
   bool get writeFileOnCrashReport => _raw.writeFileOnCrashReport;

@@ -37,6 +37,7 @@ class CompilerState;
 class CompilerTimings;
 class Class;
 class Code;
+class Bytecode;
 class Error;
 class ExceptionHandlers;
 class Field;
@@ -47,6 +48,7 @@ class HandleScope;
 class Heap;
 class HierarchyInfo;
 class Instance;
+class Interpreter;
 class Isolate;
 class IsolateGroup;
 class Library;
@@ -76,6 +78,7 @@ class Thread;
   V(Array)                                                                     \
   V(Class)                                                                     \
   V(Code)                                                                      \
+  V(Bytecode)                                                                  \
   V(Error)                                                                     \
   V(ExceptionHandlers)                                                         \
   V(Field)                                                                     \
@@ -101,6 +104,8 @@ class Thread;
     StubCode::FixAllocationStubTarget().ptr(), nullptr)                        \
   V(CodePtr, invoke_dart_code_stub_, StubCode::InvokeDartCode().ptr(),         \
     nullptr)                                                                   \
+  V(CodePtr, invoke_dart_code_from_bytecode_stub_,                             \
+    StubCode::InvokeDartCodeFromBytecode().ptr(), nullptr)                     \
   V(CodePtr, call_to_runtime_stub_, StubCode::CallToRuntime().ptr(), nullptr)  \
   V(CodePtr, late_initialization_error_shared_without_fpu_regs_stub_,          \
     StubCode::LateInitializationErrorSharedWithoutFPURegs().ptr(), nullptr)    \
@@ -213,6 +218,7 @@ class Thread;
     NativeEntry::NoScopeNativeCallWrapperEntry(), 0)                           \
   V(uword, auto_scope_native_wrapper_entry_point_,                             \
     NativeEntry::AutoScopeNativeCallWrapperEntry(), 0)                         \
+  V(uword, interpret_call_entry_point_, RuntimeEntry::InterpretCallEntry(), 0) \
   V(StringPtr*, predefined_symbols_address_, Symbols::PredefinedAddress(),     \
     NULL)                                                                      \
   V(uword, double_nan_address_, reinterpret_cast<uword>(&double_nan_constant), \
@@ -550,6 +556,10 @@ class Thread : public ThreadState {
   void set_compiler_timings(CompilerTimings* stats) {
     compiler_timings_ = stats;
   }
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  Interpreter* interpreter() const { return interpreter_; }
+  void set_interpreter(Interpreter* value) { interpreter_ = value; }
+#endif
 
   int32_t no_callback_scope_depth() const { return no_callback_scope_depth_; }
 
@@ -566,6 +576,14 @@ class Thread : public ThreadState {
   bool is_unwind_in_progress() const { return is_unwind_in_progress_; }
 
   void StartUnwindError() { is_unwind_in_progress_ = true; }
+
+  bool is_dynamicart() const {return dynamicart_;}
+
+  void set_dynamicart() {dynamicart_ = true;}
+
+  bool is_hotupdate() const {return hot_update_;}
+
+  void set_hotupdate() {hot_update_ = true;}
 
 #if defined(DEBUG)
   void EnterCompiler() {
@@ -700,7 +718,14 @@ class Thread : public ThreadState {
   void set_global_object_pool(ObjectPoolPtr raw_value) {
     global_object_pool_ = raw_value;
   }
-
+#if defined(DART_DYNAMIC_RUNTIME)
+  uword patch_function_call_entry_point() const {
+    return patch_function_call_entry_point_;
+  }
+  void set_patch_function_call_entry_point(uword raw_value) {
+    patch_function_call_entry_point_ = raw_value;
+  }
+#endif
   const uword* dispatch_table_array() const { return dispatch_table_array_; }
   void set_dispatch_table_array(const uword* array) {
     dispatch_table_array_ = array;
@@ -744,7 +769,11 @@ class Thread : public ThreadState {
   static intptr_t global_object_pool_offset() {
     return OFFSET_OF(Thread, global_object_pool_);
   }
-
+#if defined(DART_DYNAMIC_RUNTIME)
+  static intptr_t patch_function_call_entry_point_offset() {
+    return OFFSET_OF(Thread, patch_function_call_entry_point_);
+  }
+#endif
   static intptr_t dispatch_table_array_offset() {
     return OFFSET_OF(Thread, dispatch_table_array_);
   }
@@ -1101,6 +1130,8 @@ class Thread : public ThreadState {
   uword volatile vm_tag_;
   // Memory locations dedicated for passing unboxed int64 and double
   // values from generated code to runtime.
+  // Memory location dedicated for passing unboxed int64 values from
+  // generated code to runtime.
   // TODO(dartbug.com/33549): Clean this up when unboxed values
   // could be passed as arguments.
   ALIGN8 int64_t unboxed_int64_runtime_arg_;
@@ -1142,6 +1173,9 @@ class Thread : public ThreadState {
   ALIGN8 Random thread_random_;
 
   TsanUtils* tsan_utils_ = nullptr;
+#if defined(DART_DYNAMIC_RUNTIME)
+  uword patch_function_call_entry_point_;
+#endif
 
   // ---- End accessed from generated code. ----
 
@@ -1227,10 +1261,18 @@ class Thread : public ThreadState {
   uword saved_safestack_limit_;
 #endif
 
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  Interpreter* interpreter_;
+#endif
+
   Thread* next_;  // Used to chain the thread structures in an isolate.
   bool is_mutator_thread_ = false;
 
   bool is_unwind_in_progress_ = false;
+
+  bool dynamicart_ = false;
+
+  bool hot_update_ = false;
 
 #if defined(DEBUG)
   bool inside_compiler_ = false;
@@ -1263,6 +1305,7 @@ class Thread : public ThreadState {
 
   friend class ApiZone;
   friend class DisabledNoActiveIsolateScope;
+  friend class Interpreter;
   friend class InterruptChecker;
   friend class Isolate;
   friend class IsolateGroup;

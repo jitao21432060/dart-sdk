@@ -98,6 +98,33 @@ class InferredType {
     }
     return buf.toString();
   }
+
+  // BD ADD STATR:
+  String toString2() {
+    final StringBuffer buf = new StringBuffer();
+    if (concreteClass != null) {
+      buf.write(concreteClass!.toText(astTextStrategyForTesting));
+    } else if (isInt) {
+      buf.write('int');
+    } else {
+      buf.write('!');
+    }
+    if (nullable) {
+      buf.write('?');
+    }
+    if (skipCheck) {
+      buf.write(' (skip check)');
+    }
+    if (_constantValue != null) {
+      buf.write(
+          ' (value: ${_constantValue!.toText(astTextStrategyForTesting)})');
+    }
+    if (receiverNotInt) {
+      buf.write(' (receiver not int)');
+    }
+    return buf.toString();
+  }
+  // END
 }
 
 /// Repository for [InferredType].

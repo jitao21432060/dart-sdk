@@ -95,7 +95,8 @@ class StackTraceUtils : public AllStatic {
  public:
   // Find the async_op closure from the stack frame.
   static ClosurePtr FindClosureInFrame(ObjectPtr* last_object_in_caller,
-                                       const Function& function);
+                                       const Function& function,
+                                       bool is_interpreted);
 
   static ClosurePtr ClosureFromFrameFunction(
       Zone* zone,

@@ -336,7 +336,9 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   INVOKE_PASS(SetOuterInliningId);
   INVOKE_PASS(TypePropagation);
   INVOKE_PASS(ApplyClassIds);
-  INVOKE_PASS(Inlining);
+  if (!pass_state->thread->is_dynamicart()) {
+    INVOKE_PASS(Inlining);
+  }
   INVOKE_PASS(TypePropagation);
   INVOKE_PASS(ApplyClassIds);
   INVOKE_PASS(TypePropagation);

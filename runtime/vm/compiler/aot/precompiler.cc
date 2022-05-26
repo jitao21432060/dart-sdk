@@ -2,7 +2,11 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+#include <iostream>
+
 #include "vm/compiler/aot/precompiler.h"
+
+#include "vm/compiler/runtime_offsets_list.h"
 
 #include "platform/unicode.h"
 #include "platform/utils.h"
@@ -58,6 +62,7 @@
 namespace dart {
 
 #define T (thread())
+#define I (isolate())
 #define IG (isolate_group())
 #define Z (zone())
 
@@ -607,9 +612,10 @@ void Precompiler::DoCompileAll() {
 
       {
         PRECOMPILER_TIMER_SCOPE(this, Drop);
-
-        DropFunctions();
-        DropFields();
+        if (!I->dynamicart()) {
+          DropFunctions();
+          DropFields();
+        }
         TraceTypesFromRetainedClasses();
 
         // Clear these before dropping classes as they may hold onto otherwise
@@ -1682,11 +1688,17 @@ void Precompiler::CheckForNewDynamicFunctions() {
           // hit method extractor get:foo, because it will hit an existing
           // method foo first.
           selector2 = Field::NameFromGetter(selector);
-          if (IsSent(selector2)) {
+          bool isAddFunction = I->dynamicart()? IsSent(selector2) ||
+                           function.kind() ==
+                           UntaggedFunction::kImplicitGetter:IsSent(selector2);
+          if (isAddFunction) {
             AddFunction(function, RetainReasons::kCalledThroughGetter);
           }
           selector2 = Function::CreateDynamicInvocationForwarderName(selector2);
-          if (IsSent(selector2)) {
+          isAddFunction = I->dynamicart()? IsSent(selector2) ||
+                      function.kind() ==
+                      UntaggedFunction::kImplicitGetter:IsSent(selector2);
+          if (isAddFunction) {
             selector2 =
                 Function::CreateDynamicInvocationForwarderName(selector);
             function2 = function.GetDynamicInvocationForwarder(selector2);
@@ -1727,7 +1739,12 @@ void Precompiler::CheckForNewDynamicFunctions() {
             function.kind() == UntaggedFunction::kRegularFunction;
         if (is_getter || is_setter || is_regular) {
           selector2 = Function::CreateDynamicInvocationForwarderName(selector);
-          if (IsSent(selector2)) {
+          bool isAddFunction = I->dynamicart()? IsSent(selector2) ||
+                           function.kind() ==
+                           UntaggedFunction::kImplicitSetter ||
+                           function.kind() ==
+                           UntaggedFunction::kImplicitGetter:IsSent(selector2);
+          if (isAddFunction) {
             if (function.kind() == UntaggedFunction::kImplicitGetter ||
                 function.kind() == UntaggedFunction::kImplicitSetter) {
               field = function.accessor_field();
@@ -2667,6 +2684,41 @@ void Precompiler::DropClasses() {
   }
 }
 
+void Precompiler::DropKeepSdkEntry() {
+  if (!I->dynamicart()) {
+    return;
+  }
+  Library& lib = Library::Handle(Z);
+  String& lib_name = String::Handle(Z);
+  auto& members = Array::Handle(Z);
+  auto& function = Function::Handle(Z);
+  auto& cls = Class::Handle(Z);
+
+  for (intptr_t i = 0; i < libraries_.Length(); i++) {
+    lib ^= libraries_.At(i);
+    lib_name = lib.url();
+
+    if (strstr(lib_name.ToCString(), "aot_keep_vm_entry_point")) {
+      ClassDictionaryIterator it(lib, ClassDictionaryIterator::kIteratePrivate);
+
+      while (it.HasNext()) {
+        cls = it.GetNextClass();
+        if (cls.IsDynamicClass()) {
+          continue;  // class 'dynamic' is in the read-only VM isolate.
+        }
+        members = cls.functions();
+
+        for (intptr_t k = 0; k < members.Length(); k++) {
+          function ^= members.At(k);
+          if (function.HasCode()) {
+             function.ClearCode();
+          }
+        }
+      }
+    }
+  }
+}
+
 void Precompiler::DropLibraries() {
   HANDLESCOPE(T);
   const GrowableObjectArray& retained_libraries =
@@ -3406,6 +3458,12 @@ ErrorPtr Precompiler::CompileFunction(Precompiler* precompiler,
                                       Zone* zone,
                                       const Function& function) {
   PRECOMPILER_TIMER_SCOPE(precompiler, CompileFunction);
+  if (thread->isolate()->dynamicart()) {
+    thread->set_dynamicart();
+    if (thread->isolate()->hot_update()) {
+      thread->set_hotupdate();
+    }
+  }
   NoActiveIsolateScope no_isolate_scope;
 
   VMTagScope tagScope(thread, VMTag::kCompileUnoptimizedTagId);

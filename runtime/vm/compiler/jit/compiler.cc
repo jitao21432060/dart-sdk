@@ -44,6 +44,10 @@
 #include "vm/thread_registry.h"
 #include "vm/timeline.h"
 #include "vm/timer.h"
+#else
+#if defined(DART_DYNAMIC_RUNTIME)
+#include "vm/compiler/frontend/bytecode_reader.h"
+#endif
 #endif
 
 namespace dart {
@@ -1251,6 +1255,17 @@ CompilationPipeline* CompilationPipeline::New(Zone* zone,
   return NULL;
 }
 
+#if defined(DART_DYNAMIC_RUNTIME)
+DEFINE_RUNTIME_ENTRY(CompileFunction, 1) {
+  ASSERT(thread->IsMutatorThread());
+  const Function& function = Function::CheckedHandle(zone, arguments.ArgAt(0));
+  Object& result = Object::Handle(zone);
+  result = kernel::BytecodeReader::ReadFunctionBytecode(thread, function);
+  if (!result.IsNull()) {
+    Exceptions::PropagateError(Error::Cast(result));
+  }
+}
+#else
 DEFINE_RUNTIME_ENTRY(CompileFunction, 1) {
   const Function& function = Function::CheckedHandle(zone, arguments.ArgAt(0));
   FATAL3("Precompilation missed function %s (%s, %s)\n",
@@ -1258,7 +1273,7 @@ DEFINE_RUNTIME_ENTRY(CompileFunction, 1) {
          function.token_pos().ToCString(),
          Function::KindToCString(function.kind()));
 }
-
+#endif
 bool Compiler::IsBackgroundCompilation() {
   return false;
 }

@@ -33,6 +33,7 @@ typedef uint16_t ClassIdTagType;
   V(KernelProgramInfo)                                                         \
   V(WeakSerializationReference)                                                \
   V(Code)                                                                      \
+  V(Bytecode)                                                                  \
   V(Instructions)                                                              \
   V(InstructionsSection)                                                       \
   V(InstructionsTable)                                                         \
@@ -45,6 +46,7 @@ typedef uint16_t ClassIdTagType;
   V(Context)                                                                   \
   V(ContextScope)                                                              \
   V(Sentinel)                                                                  \
+  V(ParameterTypeCheck)                                                        \
   V(SingleTargetCache)                                                         \
   V(UnlinkedCall)                                                              \
   V(MonomorphicSmiableCall)                                                    \

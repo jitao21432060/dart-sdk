@@ -584,6 +584,11 @@ ClassPtr TranslationHelper::LookupClassByKernelClass(NameIndex kernel_class) {
       Class::Handle(Z, library.LookupClassAllowPrivate(class_name));
   CheckStaticLookup(klass);
   ASSERT(!klass.IsNull());
+#if defined(DART_DYNAMIC_RUNTIME)
+  if (klass.is_declared_in_bytecode()) {
+    klass.EnsureDeclarationLoaded();
+  }
+#endif
   name_index_handle_ = Smi::New(kernel_class);
   return info_.InsertClass(thread_, name_index_handle_, klass);
 }
@@ -3156,6 +3161,11 @@ void TypeTranslator::BuildInterfaceType(bool simple) {
 
   const Class& klass = Class::Handle(Z, H.LookupClassByKernelClass(klass_name));
   ASSERT(!klass.IsNull());
+#if defined(DART_DYNAMIC_RUNTIME)
+  if (klass.is_declared_in_bytecode()) {
+    klass.EnsureDeclarationLoaded();
+  }
+#endif
   if (simple) {
     if (finalize_ || klass.is_type_finalized()) {
       // Fast path for non-generic types: retrieve or populate the class's only

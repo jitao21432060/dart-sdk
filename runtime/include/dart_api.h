@@ -601,6 +601,8 @@ typedef struct {
   bool use_field_guards;
   bool use_osr;
   bool obfuscate;
+  bool dynamicart;
+  bool hot_update;
   bool load_vmservice_library;
   bool copy_parent_code;
   bool null_safety;
@@ -3553,6 +3555,23 @@ DART_EXPORT Dart_Handle Dart_LibraryHandleError(Dart_Handle library,
 DART_EXPORT DART_WARN_UNUSED_RESULT Dart_Handle
 Dart_LoadLibraryFromKernel(const uint8_t* kernel_buffer,
                            intptr_t kernel_buffer_size);
+
+/**
+ * Used for dynamic code push
+ *
+ * Called by flutter runtime to load a dynamic code bundle.
+ */
+DART_EXPORT DART_WARN_UNUSED_RESULT Dart_Handle
+Dart_LoadLibraryFromKernelInterp(const uint8_t* kernel_buffer,
+                                 intptr_t kernel_buffer_size);
+
+/**
+ * Used for hotupdate
+ */
+DART_EXPORT DART_WARN_UNUSED_RESULT Dart_Handle
+Dart_DynamicPageLoad(const uint8_t *buffer,
+                     intptr_t buffer_size,
+                     const char* pageContentCStr);
 
 /**
  * Indicates that all outstanding load requests have been satisfied.

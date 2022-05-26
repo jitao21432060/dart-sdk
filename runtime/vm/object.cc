@@ -5,6 +5,8 @@
 #include "vm/object.h"
 
 #include <memory>
+#include <vector>
+#include <string>
 
 #include "include/dart_api.h"
 #include "lib/stacktrace.h"
@@ -21,6 +23,7 @@
 #include "vm/code_descriptors.h"
 #include "vm/code_observers.h"
 #include "vm/compiler/assembler/disassembler.h"
+#include "vm/compiler/assembler/disassembler_kbc.h"
 #include "vm/compiler/jit/compiler.h"
 #include "vm/compiler/runtime_api.h"
 #include "vm/cpu.h"
@@ -69,6 +72,8 @@
 #include "vm/compiler/assembler/assembler.h"
 #include "vm/compiler/backend/code_statistics.h"
 #include "vm/compiler/compiler_state.h"
+#include "vm/compiler/frontend/bytecode_fingerprints.h"
+#include "vm/compiler/frontend/bytecode_reader.h"
 #include "vm/compiler/frontend/kernel_fingerprints.h"
 #include "vm/compiler/frontend/kernel_translation_helper.h"
 #include "vm/compiler/intrinsifier.h"
@@ -156,6 +161,7 @@ ClassPtr Object::library_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::namespace_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::kernel_program_info_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::code_class_ = static_cast<ClassPtr>(RAW_NULL);
+ClassPtr Object::bytecode_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::instructions_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::instructions_section_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::instructions_table_class_ = static_cast<ClassPtr>(RAW_NULL);
@@ -168,6 +174,7 @@ ClassPtr Object::exception_handlers_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::context_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::context_scope_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::sentinel_class_ = static_cast<ClassPtr>(RAW_NULL);
+ClassPtr Object::dyncalltypecheck_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::singletargetcache_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::unlinkedcall_class_ = static_cast<ClassPtr>(RAW_NULL);
 ClassPtr Object::monomorphicsmiablecall_class_ =
@@ -531,6 +538,21 @@ static type SpecialCharacter(type value) {
   return '\0';
 }
 
+static BytecodePtr CreateVMInternalBytecode(KernelBytecode::Opcode opcode) {
+  const KBCInstr* instructions = nullptr;
+  intptr_t instructions_size = 0;
+
+  KernelBytecode::GetVMInternalBytecodeInstructions(opcode, &instructions,
+                                                    &instructions_size);
+
+  const auto& bytecode = Bytecode::Handle(
+      Bytecode::New(reinterpret_cast<uword>(instructions), instructions_size,
+                    -1, Object::empty_object_pool()));
+  bytecode.set_pc_descriptors(Object::empty_descriptors());
+  bytecode.set_exception_handlers(Object::empty_exception_handlers());
+  return bytecode.ptr();
+}
+
 void Object::InitNullAndBool(IsolateGroup* isolate_group) {
   // Should only be run by the vm isolate.
   ASSERT(isolate_group == Dart::vm_isolate_group());
@@ -857,6 +879,9 @@ void Object::Init(IsolateGroup* isolate_group) {
   cls = Class::New<Instructions, RTN::Instructions>(isolate_group);
   instructions_class_ = cls.ptr();
 
+  cls = Class::New<Bytecode, RTN::Bytecode>(isolate_group);
+  bytecode_class_ = cls.ptr();
+
   cls =
       Class::New<InstructionsSection, RTN::InstructionsSection>(isolate_group);
   instructions_section_class_ = cls.ptr();
@@ -892,6 +917,10 @@ void Object::Init(IsolateGroup* isolate_group) {
 
   cls = Class::New<SingleTargetCache, RTN::SingleTargetCache>(isolate_group);
   singletargetcache_class_ = cls.ptr();
+
+  cls = Class::New<ParameterTypeCheck, RTN::ParameterTypeCheck>(isolate_group);
+  dyncalltypecheck_class_ = cls.ptr();
+
 
   cls = Class::New<UnlinkedCall, RTN::UnlinkedCall>(isolate_group);
   unlinkedcall_class_ = cls.ptr();
@@ -1188,6 +1217,30 @@ void Object::Init(IsolateGroup* isolate_group) {
   // needs to be created earlier as VM isolate snapshot reader references it
   // before Object::FinalizeVMIsolate.
 
+  *implicit_getter_bytecode_ =
+      CreateVMInternalBytecode(KernelBytecode::kVMInternal_ImplicitGetter);
+
+  *implicit_setter_bytecode_ =
+      CreateVMInternalBytecode(KernelBytecode::kVMInternal_ImplicitSetter);
+
+  *implicit_static_getter_bytecode_ = CreateVMInternalBytecode(
+      KernelBytecode::kVMInternal_ImplicitStaticGetter);
+
+  *method_extractor_bytecode_ =
+      CreateVMInternalBytecode(KernelBytecode::kVMInternal_MethodExtractor);
+
+  *invoke_closure_bytecode_ =
+      CreateVMInternalBytecode(KernelBytecode::kVMInternal_InvokeClosure);
+
+  *invoke_field_bytecode_ =
+      CreateVMInternalBytecode(KernelBytecode::kVMInternal_InvokeField);
+
+  *nsm_dispatcher_bytecode_ = CreateVMInternalBytecode(
+      KernelBytecode::kVMInternal_NoSuchMethodDispatcher);
+
+  *dynamic_invocation_forwarder_bytecode_ = CreateVMInternalBytecode(
+      KernelBytecode::kVMInternal_ForwardDynamicInvocation);
+
   // Some thread fields need to be reinitialized as null constants have not been
   // initialized until now.
   thread->ClearStickyError();
@@ -1257,6 +1310,22 @@ void Object::Init(IsolateGroup* isolate_group) {
   ASSERT(extractor_parameter_types_->IsArray());
   ASSERT(!extractor_parameter_names_->IsSmi());
   ASSERT(extractor_parameter_names_->IsArray());
+  ASSERT(!implicit_getter_bytecode_->IsSmi());
+  ASSERT(implicit_getter_bytecode_->IsBytecode());
+  ASSERT(!implicit_setter_bytecode_->IsSmi());
+  ASSERT(implicit_setter_bytecode_->IsBytecode());
+  ASSERT(!implicit_static_getter_bytecode_->IsSmi());
+  ASSERT(implicit_static_getter_bytecode_->IsBytecode());
+  ASSERT(!method_extractor_bytecode_->IsSmi());
+  ASSERT(method_extractor_bytecode_->IsBytecode());
+  ASSERT(!invoke_closure_bytecode_->IsSmi());
+  ASSERT(invoke_closure_bytecode_->IsBytecode());
+  ASSERT(!invoke_field_bytecode_->IsSmi());
+  ASSERT(invoke_field_bytecode_->IsBytecode());
+  ASSERT(!nsm_dispatcher_bytecode_->IsSmi());
+  ASSERT(nsm_dispatcher_bytecode_->IsBytecode());
+  ASSERT(!dynamic_invocation_forwarder_bytecode_->IsSmi());
+  ASSERT(dynamic_invocation_forwarder_bytecode_->IsBytecode());
 }
 
 void Object::FinishInit(IsolateGroup* isolate_group) {
@@ -1291,6 +1360,7 @@ void Object::Cleanup() {
   namespace_class_ = static_cast<ClassPtr>(RAW_NULL);
   kernel_program_info_class_ = static_cast<ClassPtr>(RAW_NULL);
   code_class_ = static_cast<ClassPtr>(RAW_NULL);
+  bytecode_class_ = static_cast<ClassPtr>(RAW_NULL);
   instructions_class_ = static_cast<ClassPtr>(RAW_NULL);
   instructions_section_class_ = static_cast<ClassPtr>(RAW_NULL);
   instructions_table_class_ = static_cast<ClassPtr>(RAW_NULL);
@@ -1302,6 +1372,7 @@ void Object::Cleanup() {
   exception_handlers_class_ = static_cast<ClassPtr>(RAW_NULL);
   context_class_ = static_cast<ClassPtr>(RAW_NULL);
   context_scope_class_ = static_cast<ClassPtr>(RAW_NULL);
+  dyncalltypecheck_class_ = static_cast<ClassPtr>(RAW_NULL);
   singletargetcache_class_ = static_cast<ClassPtr>(RAW_NULL);
   unlinkedcall_class_ = static_cast<ClassPtr>(RAW_NULL);
   monomorphicsmiablecall_class_ = static_cast<ClassPtr>(RAW_NULL);
@@ -1398,6 +1469,7 @@ void Object::FinalizeVMIsolate(IsolateGroup* isolate_group) {
   SET_CLASS_NAME(kernel_program_info, KernelProgramInfo);
   SET_CLASS_NAME(weak_serialization_reference, WeakSerializationReference);
   SET_CLASS_NAME(code, Code);
+  SET_CLASS_NAME(bytecode, Bytecode);
   SET_CLASS_NAME(instructions, Instructions);
   SET_CLASS_NAME(instructions_section, InstructionsSection);
   SET_CLASS_NAME(instructions_table, InstructionsTable);
@@ -1410,6 +1482,7 @@ void Object::FinalizeVMIsolate(IsolateGroup* isolate_group) {
   SET_CLASS_NAME(context, Context);
   SET_CLASS_NAME(context_scope, ContextScope);
   SET_CLASS_NAME(sentinel, Sentinel);
+  SET_CLASS_NAME(dyncalltypecheck, ParameterTypeCheck);
   SET_CLASS_NAME(singletargetcache, SingleTargetCache);
   SET_CLASS_NAME(unlinkedcall, UnlinkedCall);
   SET_CLASS_NAME(monomorphicsmiablecall, MonomorphicSmiableCall);
@@ -2923,7 +2996,12 @@ ClassPtr Class::New(IsolateGroup* isolate_group, bool register_class) {
     // references, but do not recompute size.
     result.set_is_prefinalized();
   }
+#if defined(DART_DYNAMIC_RUNTIME)
+  result.set_is_declared_in_bytecode(false);
+  result.set_binary_declaration_offset(0);
+#else
   NOT_IN_PRECOMPILED(result.set_kernel_offset(0));
+#endif
   result.InitEmptyFields();
   if (register_class) {
     isolate_group->class_table()->Register(result);
@@ -2931,7 +3009,7 @@ ClassPtr Class::New(IsolateGroup* isolate_group, bool register_class) {
   return result.ptr();
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 static void ReportTooManyTypeArguments(const Class& cls) {
   Report::MessageF(Report::kError, Script::Handle(cls.script()),
                    cls.token_pos(), Report::AtLocation,
@@ -2943,7 +3021,7 @@ static void ReportTooManyTypeArguments(const Class& cls) {
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
 void Class::set_num_type_arguments(intptr_t value) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   if (!Utils::IsInt(16, value)) {
@@ -3224,7 +3302,7 @@ void Class::set_library(const Library& value) const {
 
 void Class::set_type_parameters(const TypeParameters& value) const {
   ASSERT((num_type_arguments() == kUnknownNumTypeArguments) ||
-         is_prefinalized());
+         is_declared_in_bytecode() || is_prefinalized());
   untag()->set_type_parameters(value.ptr());
 }
 
@@ -3601,6 +3679,13 @@ FunctionPtr Class::GetInvocationDispatcher(const String& target_name,
   };
 
   // First we'll try to find it without using locks.
+#if defined(DART_DYNAMIC_RUNTIME)
+  if (Thread::Current()->isolate()->getIsInInterpreter() &&
+      kind != UntaggedFunction::kDynamicInvocationForwarder) {
+    create_if_absent = true;
+  }
+#endif
+
   function = find_entry();
   if (!function.IsNull() || !create_if_absent) {
     return function.ptr();
@@ -3614,8 +3699,15 @@ FunctionPtr Class::GetInvocationDispatcher(const String& target_name,
   if (!function.IsNull()) return function.ptr();
 
   // Otherwise create it & add it.
+#if defined(DART_DYNAMIC_RUNTIME)
+  if (create_if_absent) {
+    function = CreateInvocationDispatcher(target_name, args_desc, kind);
+    AddInvocationDispatcher(target_name, args_desc, function);
+  }
+#else
   function = CreateInvocationDispatcher(target_name, args_desc, kind);
   AddInvocationDispatcher(target_name, args_desc, function);
+#endif
   return function.ptr();
 }
 
@@ -3731,7 +3823,7 @@ FunctionPtr Function::CreateMethodExtractor(const String& getter_name) const {
 #endif
   signature.set_result_type(Object::dynamic_type());
 
-  extractor.InheritKernelOffsetFrom(*this);
+  extractor.InheritBinaryDeclarationFrom(*this);
 
   extractor.set_extracted_method_closure(closure_function);
   extractor.set_is_debuggable(false);
@@ -3869,7 +3961,7 @@ StringPtr Function::CreateDynamicInvocationForwarderName(const String& name) {
   return Symbols::FromConcat(Thread::Current(), Symbols::DynamicPrefix(), name);
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 FunctionPtr Function::CreateDynamicInvocationForwarder(
     const String& mangled_name) const {
   Thread* thread = Thread::Current();
@@ -3894,6 +3986,7 @@ FunctionPtr Function::CreateDynamicInvocationForwarder(
   forwarder.set_is_visible(false);
 
   forwarder.ClearICDataArray();
+  forwarder.ClearBytecode();
   forwarder.ClearCode();
   forwarder.set_usage_counter(0);
   forwarder.set_deoptimization_counter(0);
@@ -3901,7 +3994,7 @@ FunctionPtr Function::CreateDynamicInvocationForwarder(
   forwarder.set_inlining_depth(0);
   forwarder.set_optimized_call_site_count(0);
 
-  forwarder.InheritKernelOffsetFrom(*this);
+  forwarder.InheritBinaryDeclarationFrom(*this);
   forwarder.SetForwardingTarget(*this);
 
   return forwarder.ptr();
@@ -4020,7 +4113,7 @@ static bool IsMutatorOrAtDeoptSafepoint() {
 }
 #endif
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 class CHACodeArray : public WeakCodeReferences {
  public:
@@ -4440,10 +4533,23 @@ ObjectPtr Class::EvaluateCompiledExpression(
 
 void Class::EnsureDeclarationLoaded() const {
   if (!is_declaration_loaded()) {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
     UNREACHABLE();
 #else
-    FATAL1("Unable to use class %s which is not loaded yet.", ToCString());
+#if defined(DART_DYNAMIC_RUNTIME)
+    if (!is_declared_in_bytecode()) {
+        return;
+    }
+#else
+    // Loading of class declaration can be postponed until needed
+    // if class comes from bytecode.
+    if (!is_declared_in_bytecode()) {
+      FATAL1("Unable to use class %s which is not loaded yet.", ToCString());
+    }
+#endif
+    kernel::BytecodeReader::LoadClassDeclaration(*this);
+    ASSERT(is_declaration_loaded());
+    ASSERT(is_type_finalized());
 #endif
   }
 }
@@ -4454,7 +4560,7 @@ ErrorPtr Class::EnsureIsFinalized(Thread* thread) const {
   if (is_finalized()) {
     return Error::null();
   }
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
   return Error::null();
 #else
@@ -4501,7 +4607,7 @@ ErrorPtr Class::EnsureIsAllocateFinalized(Thread* thread) const {
   if (is_allocate_finalized()) {
     return Error::null();
   }
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   error ^= ClassFinalizer::AllocateFinalizeClass(*this);
@@ -4642,7 +4748,12 @@ ClassPtr Class::NewCommon(intptr_t index) {
   result.set_num_type_arguments_unsafe(kUnknownNumTypeArguments);
   result.set_num_native_fields(0);
   result.set_state_bits(0);
+#if defined(DART_DYNAMIC_RUNTIME)
+  result.set_is_declared_in_bytecode(false);
+  result.set_binary_declaration_offset(0);
+#else
   NOT_IN_PRECOMPILED(result.set_kernel_offset(0));
+#endif
   result.InitEmptyFields();
   return result.ptr();
 }
@@ -4963,6 +5074,8 @@ const char* Class::GenerateUserVisibleName() const {
       return Symbols::WeakSerializationReference().ToCString();
     case kCodeCid:
       return Symbols::Code().ToCString();
+    case kBytecodeCid:
+      return Symbols::Bytecode().ToCString();
     case kInstructionsCid:
       return Symbols::Instructions().ToCString();
     case kInstructionsSectionCid:
@@ -4987,6 +5100,8 @@ const char* Class::GenerateUserVisibleName() const {
       return Symbols::ContextScope().ToCString();
     case kSentinelCid:
       return Symbols::Sentinel().ToCString();
+    case kParameterTypeCheckCid:
+      return Symbols::ParameterTypeCheck().ToCString();
     case kSingleTargetCacheCid:
       return Symbols::SingleTargetCache().ToCString();
     case kICDataCid:
@@ -5035,7 +5150,7 @@ void Class::set_script(const Script& value) const {
   untag()->set_script(value.ptr());
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 void Class::set_token_pos(TokenPosition token_pos) const {
   ASSERT(!token_pos.IsClassifying());
   StoreNonPointer(&untag()->token_pos_, token_pos);
@@ -5158,7 +5273,7 @@ void Class::set_interfaces(const Array& value) const {
   untag()->set_interfaces(value.ptr());
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 void Class::AddDirectImplementor(const Class& implementor,
                                  bool is_mixin) const {
@@ -5616,7 +5731,6 @@ FunctionPtr Class::LookupFunctionReadLocked(const String& name,
                                             MemberKind kind) const {
   ASSERT(!IsNull());
   Thread* thread = Thread::Current();
-  RELEASE_ASSERT(is_finalized());
   // Caller needs to ensure they grab program_lock because this method
   // can be invoked with either ReadRwLock or WriteRwLock.
 #if defined(DEBUG)
@@ -5674,6 +5788,11 @@ FunctionPtr Class::LookupFunctionAllowPrivate(const String& name,
                                               MemberKind kind) const {
   ASSERT(!IsNull());
   Thread* thread = Thread::Current();
+#if defined(DART_DYNAMIC_RUNTIME)
+  if (!is_finalized()) {
+    this->EnsureIsFinalized(thread);
+  }
+#endif
   RELEASE_ASSERT(is_finalized());
   SafepointReadRwLocker ml(thread, thread->isolate_group()->program_lock());
   REUSABLE_ARRAY_HANDLESCOPE(thread);
@@ -7191,22 +7310,93 @@ void Function::AttachCode(const Code& value) const {
 bool Function::HasCode() const {
   NoSafepointScope no_safepoint;
   ASSERT(untag()->code() != Code::null());
-  return untag()->code() != StubCode::LazyCompile().ptr();
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
+  return untag()->code_ != StubCode::LazyCompile().ptr();
+#else
+  return untag()->code_ != StubCode::LazyCompile().ptr() &&
+         untag()->code_ != StubCode::InterpretCall().ptr();
+#endif  // defined(DART_PRECOMPILED_RUNTIME)
 }
+
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+bool Function::IsBytecodeAllowed(Zone* zone) const {
+#if !defined(DART_DYNAMIC_RUNTIME)
+  if (FLAG_intrinsify) {
+    // Bigint intrinsics should not be interpreted, because their Dart version
+    // is only to be used when intrinsics are disabled. Mixing an interpreted
+    // Dart version with a compiled intrinsified version results in a mismatch
+    // in the number of digits processed by each call.
+    switch (recognized_kind()) {
+      case MethodRecognizer::kBigint_lsh:
+      case MethodRecognizer::kBigint_rsh:
+      case MethodRecognizer::kBigint_absAdd:
+      case MethodRecognizer::kBigint_absSub:
+      case MethodRecognizer::kBigint_mulAdd:
+      case MethodRecognizer::kBigint_sqrAdd:
+      case MethodRecognizer::kBigint_estimateQuotientDigit:
+      case MethodRecognizer::kMontgomery_mulMod:
+        return false;
+      default:
+        break;
+    }
+  }
+  switch (kind()) {
+    case UntaggedFunction::kDynamicInvocationForwarder:
+      return is_declared_in_bytecode();
+    case UntaggedFunction::kImplicitClosureFunction:
+    case UntaggedFunction::kIrregexpFunction:
+    case UntaggedFunction::kFfiTrampoline:
+      return false;
+    default:
+      return true;
+  }
+#else
+return true;
+#endif
+}
+
+void Function::AttachBytecode(const Bytecode& value) const {
+  DEBUG_ASSERT(IsMutatorOrAtSafepoint());
+  ASSERT(!value.IsNull());
+  // Finish setting up code before activating it.
+  if (!value.InVMIsolateHeap()) {
+    value.set_function(*this);
+  }
+  StorePointer(&untag()->bytecode_, value.ptr());
+
+  // We should not have loaded the bytecode if the function had code.
+  // However, we may load the bytecode to access source positions (see
+  // ProcessBytecodeTokenPositionsEntry in kernel.cc).
+  // In that case, do not install InterpretCall stub below.
+  if (FLAG_enable_interpreter && !HasCode()) {
+    // Set the code entry_point to InterpretCall stub.
+    SetInstructions(StubCode::InterpretCall());
+  }
+}
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
 bool Function::HasCode(FunctionPtr function) {
   NoSafepointScope no_safepoint;
   ASSERT(function->untag()->code() != Code::null());
-  return function->untag()->code() != StubCode::LazyCompile().ptr();
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
+  return function->untag()->code_ != StubCode::LazyCompile().ptr();
+#else
+  return function->untag()->code_ != StubCode::LazyCompile().ptr() &&
+         function->untag()->code_ != StubCode::InterpretCall().ptr();
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 }
 
 void Function::ClearCode() const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   ASSERT(IsolateGroup::Current()->program_lock()->IsCurrentThreadWriter());
   untag()->set_unoptimized_code(Code::null());
-  SetInstructions(StubCode::LazyCompile());
+  if (FLAG_enable_interpreter && HasBytecode()) {
+    SetInstructions(StubCode::InterpretCall());
+  } else {
+    SetInstructions(StubCode::LazyCompile());
+  }
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 }
 
@@ -7217,6 +7407,14 @@ void Function::ClearCodeSafe() const {
   untag()->set_unoptimized_code(Code::null());
 
   SetInstructionsSafe(StubCode::LazyCompile());
+#endif  // defined(DART_PRECOMPILED_RUNTIME)
+}
+
+void Function::ClearBytecode() const {
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
+  UNREACHABLE();
+#else
+  StorePointer(&untag()->bytecode_, Bytecode::null());
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 }
 
@@ -7290,7 +7488,7 @@ void Function::SwitchToLazyCompiledUnoptimizedCode() const {
 }
 
 void Function::set_unoptimized_code(const Code& value) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   DEBUG_ASSERT(IsMutatorOrAtDeoptSafepoint());
@@ -7836,7 +8034,7 @@ StringPtr Function::ParameterNameAt(intptr_t index) const {
 }
 
 void Function::SetParameterNameAt(intptr_t index, const String& value) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   ASSERT(!value.IsNull() && value.IsSymbol());
@@ -7850,7 +8048,7 @@ void Function::SetParameterNameAt(intptr_t index, const String& value) const {
 #endif
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 void Function::set_positional_parameter_names(const Array& value) const {
   ASSERT(value.ptr() == Object::empty_array().ptr() || value.Length() > 0);
   untag()->set_positional_parameter_names(value.ptr());
@@ -7870,7 +8068,7 @@ StringPtr FunctionType::ParameterNameAt(intptr_t index) const {
 
 void FunctionType::SetParameterNameAt(intptr_t index,
                                       const String& value) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   ASSERT(!value.IsNull() && value.IsSymbol());
@@ -7890,7 +8088,7 @@ void FunctionType::set_named_parameter_names(const Array& value) const {
 }
 
 void Function::CreateNameArray(Heap::Space space) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   const intptr_t num_positional_params =
@@ -7905,7 +8103,7 @@ void Function::CreateNameArray(Heap::Space space) const {
 }
 
 void FunctionType::CreateNameArrayIncludingFlags(Heap::Space space) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   const intptr_t num_named_parameters = NumOptionalNamedParameters();
@@ -8114,7 +8312,7 @@ void Function::set_recognized_kind(MethodRecognizer::Kind value) const {
 }
 
 void Function::set_token_pos(TokenPosition token_pos) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   ASSERT(!token_pos.IsClassifying() || IsMethodExtractor());
@@ -9101,20 +9299,31 @@ FunctionPtr Function::New(const FunctionType& signature,
   result.set_has_pragma(false);
   result.set_is_polymorphic_target(false);
   result.set_is_synthetic(false);
-  NOT_IN_PRECOMPILED(result.set_state_bits(0));
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+    result.set_state_bits(0);
+#endif
   result.set_owner(owner);
-  NOT_IN_PRECOMPILED(result.set_token_pos(token_pos));
-  NOT_IN_PRECOMPILED(result.set_end_token_pos(token_pos));
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  result.set_token_pos(token_pos);
+  result.set_end_token_pos(token_pos);
+#endif
   NOT_IN_PRECOMPILED(result.set_usage_counter(0));
   NOT_IN_PRECOMPILED(result.set_deoptimization_counter(0));
   NOT_IN_PRECOMPILED(result.set_optimized_instruction_count(0));
   NOT_IN_PRECOMPILED(result.set_optimized_call_site_count(0));
   NOT_IN_PRECOMPILED(result.set_inlining_depth(0));
-  NOT_IN_PRECOMPILED(result.set_kernel_offset(0));
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  result.set_is_declared_in_bytecode(false);
+  result.set_binary_declaration_offset(0);
+#endif
   result.set_is_optimizable(is_native ? false : true);
   result.set_is_inlinable(true);
   result.reset_unboxed_parameters_and_return();
+#if !defined(DART_DYNAMIC_RUNTIME)
   result.SetInstructionsSafe(StubCode::LazyCompile());
+#else
+  result.SetInstructionsSafe(StubCode::InterpretCall());
+#endif
   if (kind == UntaggedFunction::kClosureFunction ||
       kind == UntaggedFunction::kImplicitClosureFunction) {
     ASSERT(space == Heap::kOld);
@@ -9209,7 +9418,7 @@ FunctionPtr Function::ImplicitClosureFunction() const {
     return implicit_closure_function();
   }
 
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   // In AOT mode all implicit closures are pre-created.
   FATAL("Cannot create implicit closure in AOT!");
   return Function::null();
@@ -9331,11 +9540,16 @@ FunctionPtr Function::ImplicitClosureFunction() const {
     }
   }
   closure_signature.FinalizeNameArray();
-  closure_function.InheritKernelOffsetFrom(*this);
+  closure_function.InheritBinaryDeclarationFrom(*this);
 
-  if (!is_static() && !IsConstructor()) {
-    // Change covariant parameter types to either Object? for an opted-in
-    // implicit closure or to Object* for a legacy implicit closure.
+  // Change covariant parameter types to either Object? for an opted-in implicit
+  // closure or to Object* for a legacy implicit closure.
+#if defined(DART_DYNAMIC_RUNTIME)
+    if (!is_static()&&!IsConstructor() && is_declared_in_bytecode() &&
+      !HasCode() && !is_abstract()) {
+#else
+    if (!is_static() && !IsConstructor()) {
+#endif
     BitVector is_covariant(zone, NumParameters());
     BitVector is_generic_covariant_impl(zone, NumParameters());
     kernel::ReadParameterCovariance(*this, &is_covariant,
@@ -9639,19 +9853,25 @@ ClassPtr Function::origin() const {
   return PatchClass::Cast(obj).origin_class();
 }
 
-void Function::InheritKernelOffsetFrom(const Function& src) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+void Function::InheritBinaryDeclarationFrom(const Function& src) const {
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
-  StoreNonPointer(&untag()->kernel_offset_, src.untag()->kernel_offset_);
+  StoreNonPointer(&untag()->kernel_offset_,
+                  src.untag()->kernel_offset_);
 #endif
 }
 
-void Function::InheritKernelOffsetFrom(const Field& src) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+void Function::InheritBinaryDeclarationFrom(const Field& src) const {
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
-  set_kernel_offset(src.kernel_offset());
+  if (src.is_declared_in_bytecode()) {
+    set_is_declared_in_bytecode(true);
+    set_bytecode_offset(src.bytecode_offset());
+  } else {
+    set_kernel_offset(src.kernel_offset());
+  }
 #endif
 }
 
@@ -10700,11 +10920,12 @@ ExternalTypedDataPtr Field::KernelData() const {
   return PatchClass::Cast(obj).library_kernel_data();
 }
 
-void Field::InheritKernelOffsetFrom(const Field& src) const {
+void Field::InheritBinaryDeclarationFrom(const Field& src) const {
 #if defined(DART_PRECOMPILED_RUNTIME)
   UNREACHABLE();
 #else
-  StoreNonPointer(&untag()->kernel_offset_, src.untag()->kernel_offset_);
+  StoreNonPointer(&untag()->kernel_offset_,
+                  src.untag()->kernel_offset_);
 #endif
 }
 
@@ -10781,7 +11002,10 @@ void Field::InitializeNew(const Field& result,
                                             !is_static);
   }
   result.set_initializer_changed_after_initialization(false);
-  NOT_IN_PRECOMPILED(result.set_kernel_offset(0));
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  result.set_is_declared_in_bytecode(false);
+  result.set_binary_declaration_offset(0);
+#endif
   result.set_has_pragma(false);
   result.set_static_type_exactness_state_unsafe(
       StaticTypeExactnessState::NotTracking());
@@ -10853,7 +11077,7 @@ FieldPtr Field::Clone(const Field& original) const {
   // guarded, will be reconciled during optimized code installation.
   clone ^= Object::Clone(*this, Heap::kOld, /*load_with_relaxed_atomics=*/true);
   clone.SetOriginal(original);
-  clone.InheritKernelOffsetFrom(original);
+  clone.InheritBinaryDeclarationFrom(original);
   return clone.ptr();
 }
 
@@ -11090,7 +11314,7 @@ FunctionPtr Field::EnsureInitializerFunction() const {
   Zone* zone = thread->zone();
   Function& initializer = Function::Handle(zone, InitializerFunction());
   if (initializer.IsNull()) {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
     UNREACHABLE();
 #else
     SafepointMutexLocker ml(
@@ -11106,7 +11330,7 @@ FunctionPtr Field::EnsureInitializerFunction() const {
 }
 
 void Field::SetInitializerFunction(const Function& initializer) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   ASSERT(IsOriginal());
@@ -11975,7 +12199,7 @@ ArrayPtr Script::debug_positions() const {
   return untag()->debug_positions();
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 void Script::SetLazyLookupSourceAndLineStarts(bool value) const {
   StoreNonPointer(&untag()->flags_and_max_position_,
                   UntaggedScript::LazyLookupSourceAndLineStartsBit::update(
@@ -12018,7 +12242,7 @@ bool Script::IsValidTokenPosition(TokenPosition token_pos) const {
          max_position.Pos() == 0 || token_pos <= max_position;
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 static bool IsLetter(int32_t c) {
   return (('A' <= c) && (c <= 'Z')) || (('a' <= c) && (c <= 'z'));
 }
@@ -12040,10 +12264,12 @@ bool Script::GetTokenLocation(const TokenPosition& token_pos,
                               intptr_t* line,
                               intptr_t* column) const {
   ASSERT(line != nullptr);
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   // Scripts in the AOT snapshot do not have a line starts array.
   return false;
-#else
+#endif
+
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
   if (!token_pos.IsReal()) return false;
 
   auto const zone = Thread::Current()->zone();
@@ -12056,7 +12282,7 @@ bool Script::GetTokenLocation(const TokenPosition& token_pos,
 }
 
 intptr_t Script::GetTokenLength(const TokenPosition& token_pos) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   // Scripts in the AOT snapshot do not have their source.
   return -1;
 #else
@@ -12385,15 +12611,20 @@ void Library::SetLoaded() const {
 }
 
 void Library::AddMetadata(const Object& declaration,
-                          intptr_t kernel_offset) const {
-#if defined(DART_PRECOMPILED_RUNTIME)
+                          intptr_t kernel_offset,
+                          intptr_t bytecode_offset) const {
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
-  Thread* thread = Thread::Current();
-  ASSERT(thread->isolate_group()->program_lock()->IsCurrentThreadWriter());
-
+  // bytecode is negative in metadata map
+  // kernel is positive
   MetadataMap map(metadata());
-  map.UpdateOrInsert(declaration, Smi::Handle(Smi::New(kernel_offset)));
+  if (bytecode_offset > 0) {
+    bytecode_offset = ~bytecode_offset + 1;
+    map.UpdateOrInsert(declaration, Smi::Handle(Smi::New(bytecode_offset)));
+  } else {
+    map.UpdateOrInsert(declaration, Smi::Handle(Smi::New(kernel_offset)));
+  }
   set_metadata(map.Release());
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 }
@@ -12435,24 +12666,70 @@ ObjectPtr Library::GetMetadata(const Object& declaration) const {
   }
   const auto& smi_value = Smi::Cast(value);
   intptr_t kernel_offset = smi_value.Value();
-  ASSERT(kernel_offset > 0);
-  const auto& evaluated_value = Object::Handle(
-      zone, kernel::EvaluateMetadata(
-                *this, kernel_offset,
-                /* is_annotations_offset = */ declaration.IsLibrary() ||
+  if (kernel_offset < 0) {
+    // bytecode
+    kernel_offset = ~kernel_offset + 1;
+    Object& metadata =
+        Object::Handle(kernel::BytecodeReader::ReadAnnotation2(*this,
+                                                               kernel_offset));
+    return metadata.ptr();
+  } else {
+    // aot
+    ASSERT(kernel_offset > 0);
+    const auto& evaluated_value = Object::Handle(
+        zone, kernel::EvaluateMetadata(
+                    *this, kernel_offset,
+                    /* is_annotations_offset = */ declaration.IsLibrary() ||
                     declaration.IsNamespace()));
-  if (evaluated_value.IsArray() || evaluated_value.IsNull()) {
-    ASSERT(evaluated_value.ptr() != Object::empty_array().ptr());
-    SafepointWriteRwLocker ml(thread, thread->isolate_group()->program_lock());
-    MetadataMap map(metadata());
-    if (map.GetOrNull(declaration) == smi_value.ptr()) {
-      map.UpdateOrInsert(declaration, evaluated_value);
-    } else {
-      ASSERT(map.GetOrNull(declaration) == evaluated_value.ptr());
+    if (evaluated_value.IsArray() || evaluated_value.IsNull()) {
+      ASSERT(evaluated_value.ptr() != Object::empty_array().ptr());
+      SafepointWriteRwLocker ml(thread,
+                                thread->isolate_group()->program_lock());
+      MetadataMap map(metadata());
+      if (map.GetOrNull(declaration) == smi_value.ptr()) {
+        map.UpdateOrInsert(declaration, evaluated_value);
+      } else {
+        ASSERT(map.GetOrNull(declaration) == evaluated_value.ptr());
+      }
+      set_metadata(map.Release());
     }
+    return evaluated_value.ptr();
+  }
+#endif  // defined(DART_PRECOMPILED_RUNTIME)
+}
+
+ArrayPtr Library::GetExtendedMetadata(const Object& obj, intptr_t count) const {
+#if defined(DART_PRECOMPILED_RUNTIME)
+  return Object::empty_array().ptr();
+#else
+  auto thread = Thread::Current();
+  auto zone = thread->zone();
+
+  RELEASE_ASSERT(obj.IsFunction() || obj.IsLibrary());
+
+  Object& value = Object::Handle(zone);
+  {
+    SafepointReadRwLocker ml(thread, thread->isolate_group()->program_lock());
+    MetadataMap map(metadata());
+    value = map.GetOrNull(obj);
     set_metadata(map.Release());
   }
-  return evaluated_value.ptr();
+  if (value.IsNull()) {
+    // There is no metadata for this object.
+    return Object::empty_array().ptr();
+  }
+  if (!value.IsSmi()) {
+    // Metadata is already evaluated.
+    ASSERT(value.IsArray());
+    auto& array_result = Array::Cast(value);
+    return array_result.ptr();
+  }
+  const auto& smi_value = Smi::Cast(value);
+  intptr_t kernel_offset = smi_value.Value();
+  ASSERT(kernel_offset > 0);
+
+  return kernel::BytecodeReader::ReadExtendedAnnotations2(*this, kernel_offset,
+                                                          count);
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 }
 
@@ -13284,7 +13561,10 @@ LibraryPtr Library::NewLibraryHelper(const String& url, bool import_core_lib) {
     result.set_debuggable(true);
   }
   result.set_is_dart_scheme(dart_scheme);
-  NOT_IN_PRECOMPILED(result.set_kernel_offset(0));
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  result.set_is_declared_in_bytecode(false);
+  result.set_binary_declaration_offset(0);
+#endif
   result.StoreNonPointer(&result.untag()->load_state_,
                          UntaggedLibrary::kAllocated);
   result.StoreNonPointer(&result.untag()->index_, -1);
@@ -14295,6 +14575,12 @@ ClassPtr KernelProgramInfo::InsertClass(Thread* thread,
   return result.ptr();
 }
 
+void KernelProgramInfo::set_bytecode_component(
+    const Array& bytecode_component) const {
+//  StorePointer(&untag()->bytecode_component_, bytecode_component.ptr());
+  untag()->set_bytecode_component(bytecode_component.ptr());
+}
+
 ErrorPtr Library::CompileAll(bool ignore_error /* = false */) {
   Thread* thread = Thread::Current();
   Zone* zone = thread->zone();
@@ -14335,7 +14621,8 @@ ErrorPtr Library::CompileAll(bool ignore_error /* = false */) {
   return error.ptr();
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 ErrorPtr Library::FinalizeAllClasses() {
   Thread* thread = Thread::Current();
@@ -14369,7 +14656,7 @@ ErrorPtr Library::FinalizeAllClasses() {
   return Error::null();
 }
 
-#endif  // !defined(DART_PRECOMPILED_RUNTIME)
+#endif  // !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 // Return Function::null() if function does not exist in libs.
 FunctionPtr Library::GetFunction(const GrowableArray<Library*>& libs,
@@ -14806,7 +15093,8 @@ void ObjectPool::DebugPrint() const {
   for (intptr_t i = 0; i < Length(); i++) {
     intptr_t offset = OffsetFromIndex(i);
     THR_Print("  [pp+0x%" Px "] ", offset);
-    if (TypeAt(i) == EntryType::kTaggedObject) {
+    if ((TypeAt(i) == EntryType::kTaggedObject) ||
+        (TypeAt(i) == EntryType::kNativeEntryData)) {
       const Object& obj = Object::Handle(ObjectAt(i));
       THR_Print("%s (obj)\n", obj.ToCString());
     } else if (TypeAt(i) == EntryType::kNativeFunction) {
@@ -15410,6 +15698,44 @@ const char* ExceptionHandlers::ToCString() const {
 #undef FORMAT2
 }
 
+void ParameterTypeCheck::set_type_or_bound(const AbstractType& value) const {
+  StorePointer(&untag()->type_or_bound_, value.ptr());
+}
+
+void ParameterTypeCheck::set_param(const AbstractType& value) const {
+  StorePointer(&untag()->param_, value.ptr());
+}
+
+void ParameterTypeCheck::set_name(const String& value) const {
+  StorePointer(&untag()->name_, value.ptr());
+}
+
+void ParameterTypeCheck::set_cache(const SubtypeTestCache& value) const {
+  StorePointer(&untag()->cache_, value.ptr());
+}
+
+const char* ParameterTypeCheck::ToCString() const {
+  Zone* zone = Thread::Current()->zone();
+  return zone->PrintToString("ParameterTypeCheck(%" Pd " %s %s %s)", index(),
+                             Object::Handle(zone, param()).ToCString(),
+                             Object::Handle(zone, type_or_bound()).ToCString(),
+                             Object::Handle(zone, name()).ToCString());
+}
+
+ParameterTypeCheckPtr ParameterTypeCheck::New() {
+  ParameterTypeCheck& result = ParameterTypeCheck::Handle();
+  {
+    ObjectPtr raw =
+        Object::Allocate(ParameterTypeCheck::kClassId,
+                         ParameterTypeCheck::InstanceSize(), Heap::kOld,
+                         ParameterTypeCheck::ContainsCompressedPointers());
+    NoSafepointScope no_safepoint;
+    result ^= raw;
+  }
+  result.set_index(0);
+  return result.ptr();
+}
+
 void SingleTargetCache::set_target(const Code& value) const {
   untag()->set_target(value.ptr());
 }
@@ -15520,8 +15846,12 @@ void ICData::SetTargetAtPos(const Array& data,
 #else
   // AOT
   ASSERT(target.HasCode());
+#if !defined(DART_DYNAMIC_RUNTIME)
   const Code& code = Code::Handle(target.CurrentCode());
   data.SetAt(data_pos + CodeIndexFor(num_args_tested), code);
+#else
+  data.SetAt(data_pos + CodeIndexFor(num_args_tested), Object::smi_zero());
+#endif
   data.SetAt(data_pos + EntryPointIndexFor(num_args_tested), target);
 #endif
 }
@@ -15702,7 +16032,9 @@ intptr_t ICData::NumberOfChecks() const {
       return i;
     }
   }
+#if !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
+#endif
   return -1;
 }
 
@@ -15987,6 +16319,20 @@ void ICData::EnsureHasReceiverCheck(intptr_t receiver_class_id,
 
   AddReceiverCheckInternal(receiver_class_id, target, count, exactness);
 }
+#if defined(DART_DYNAMIC_RUNTIME)
+void ICData::EnsureHasReceiverCheck2(intptr_t receiver_class_id,
+                                    const Function& target,
+                                    intptr_t count,
+                                    StaticTypeExactnessState exactness) const {
+  SafepointMutexLocker ml(IsolateGroup::Current()->type_feedback_mutex());
+
+  GrowableArray<intptr_t> class_ids(1);
+  class_ids.Add(receiver_class_id);
+  if (FindCheck(class_ids) != -1) return;
+
+  AddReceiverCheck2(receiver_class_id, target, count, exactness);
+}
+#endif
 
 void ICData::AddReceiverCheck(intptr_t receiver_class_id,
                               const Function& target,
@@ -16033,12 +16379,89 @@ void ICData::AddReceiverCheckInternal(
     data.SetAt(data_pos + ExactnessIndexFor(kNumArgsTested),
                Smi::Handle(Smi::New(exactness.Encode())));
   }
+#else
+#if defined(DART_DYNAMIC_RUNTIME)
+  if (Thread::Current()->isolate()->getIsInInterpreter()) {
+      data.SetAt(data_pos + CountIndexFor(kNumArgsTested),
+             Smi::Handle(Smi::New(count)));
+      if (is_tracking_exactness()) {
+        data.SetAt(data_pos + ExactnessIndexFor(kNumArgsTested),
+                   Smi::Handle(Smi::New(exactness.Encode())));
+      }
+  }
+#endif
 #endif
 
   // Multithreaded access to ICData requires setting of array to be the last
   // operation.
   set_entries(data);
 }
+
+#if defined(DART_DYNAMIC_RUNTIME)
+void ICData::AddReceiverCheck2(intptr_t receiver_class_id,
+                                  const Function& target,
+                                  intptr_t count,
+                                  StaticTypeExactnessState exactness) const {
+  ASSERT(!target.IsNull());
+  const intptr_t kNumArgsTested = 1;
+  ASSERT(NumArgsTested() == kNumArgsTested);  // Otherwise use 'AddCheck'.
+  ASSERT(receiver_class_id != kIllegalCid);
+
+  intptr_t index = -1;
+  Array& data = Array::Handle(Grow(&index));
+  intptr_t data_pos = index * TestEntryLength();
+  if ((receiver_class_id == kSmiCid) && (data_pos > 0)) {
+    ASSERT(GetReceiverClassIdAt(0) != kSmiCid);
+    // Move class occupying position 0 to the data_pos.
+    for (intptr_t i = 0; i < TestEntryLength(); i++) {
+      data.SetAt(data_pos + i, Object::Handle(data.At(i)));
+    }
+    // Insert kSmiCid in position 0.
+    data_pos = 0;
+  }
+  data.SetAt(data_pos, Smi::Handle(Smi::New(receiver_class_id)));
+  if (!target.HasCode()) {
+    data.SetAt(data_pos + CountIndexFor(kNumArgsTested), target);
+    data.SetAt(data_pos + TargetIndexFor(kNumArgsTested),
+               Smi::Handle(Smi::New(count)));
+    if (is_tracking_exactness()) {
+        data.SetAt(data_pos + ExactnessIndexFor(kNumArgsTested),
+                   Smi::Handle(Smi::New(exactness.Encode())));
+    }
+  } else {
+    // AOT
+    ASSERT(target.HasCode());
+    const Code& code = Code::Handle(target.CurrentCode());
+    data.SetAt(data_pos + CodeIndexFor(kNumArgsTested), code);
+    data.SetAt(data_pos + EntryPointIndexFor(kNumArgsTested), target);
+  }
+  // Multithreaded access to ICData requires setting of array to be the last
+  // operation.
+  set_entries(data);
+}
+
+void ICData::FlateMegamorphicCache(const MegamorphicCache& cache) const {
+  NoSafepointScope no_safepoint;
+  ArrayPtr raw_data = entries();
+  int count = NumberOfChecks();
+  for (int i = 0; i < count; i++) {
+    intptr_t data_pos = i * TestEntryLength();
+    const Smi& class_id =
+        Smi::Handle(Smi::RawCast(raw_data->untag()->data()[data_pos]));
+    data_pos += NumArgsTested();
+    const Object& obj = Object::Handle(raw_data->untag()->data()[data_pos]);
+    if (obj.IsFunction()) {
+      cache.EnsureContains(class_id, obj);
+    } else if (obj.IsCode()) {
+      cache.EnsureContains(class_id, Smi::Handle(
+              Smi::FromAlignedAddress(Code::EntryPointOf(
+                                      Code::RawCast(obj.ptr())))));
+    } else {
+      continue;
+    }
+  }
+}
+#endif
 
 StaticTypeExactnessState ICData::GetExactnessAt(intptr_t index) const {
   if (!is_tracking_exactness()) {
@@ -16516,6 +16939,12 @@ ICDataPtr ICData::NewWithCheck(const Function& owner,
   SetTargetAtPos(array, 0, num_args_tested, target);
 #if !defined(DART_PRECOMPILED_RUNTIME)
   array.SetAt(CountIndexFor(num_args_tested), Object::smi_zero());
+#else
+#if defined(DART_DYNAMIC_RUNTIME)
+  if (Thread::Current()->isolate()->getIsInInterpreter()) {
+    array.SetAt(CountIndexFor(num_args_tested), Object::smi_zero());
+  }
+#endif
 #endif
   WriteSentinel(array, entry_len, result);
 
@@ -16546,7 +16975,7 @@ ICDataPtr ICData::NewForStaticCall(const Function& owner,
                               target, Object::null_abstract_type());
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 ICDataPtr ICData::NewFrom(const ICData& from, intptr_t num_args_tested) {
   // See comment in [ICData::Clone] why we access the megamorphic bit first.
   const bool is_megamorphic = from.is_megamorphic();
@@ -17602,6 +18031,236 @@ void Code::DumpSourcePositions(bool relative_addresses) const {
   const Function& root = Function::Handle(function());
   CodeSourceMapReader reader(map, id_map, root);
   reader.DumpSourcePositions(relative_addresses ? 0 : PayloadStart());
+}
+
+void Bytecode::Disassemble(DisassemblyFormatter* formatter) const {
+#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  if (!FLAG_support_disassembler) {
+    return;
+  }
+  uword start = PayloadStart();
+  intptr_t size = Size();
+  if (formatter == NULL) {
+    KernelBytecodeDisassembler::Disassemble(start, start + size, *this);
+  } else {
+    KernelBytecodeDisassembler::Disassemble(start, start + size, formatter,
+                                            *this);
+  }
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
+#endif  // !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
+}
+
+BytecodePtr Bytecode::New(uword instructions,
+                          intptr_t instructions_size,
+                          intptr_t instructions_offset,
+                          const ObjectPool& object_pool) {
+  ASSERT(Object::bytecode_class() != Class::null());
+  Bytecode& result = Bytecode::Handle();
+  {
+    uword size = Bytecode::InstanceSize();
+    ObjectPtr raw = Object::Allocate(Bytecode::kClassId, size, Heap::kOld,
+                                     Bytecode::ContainsCompressedPointers());
+    NoSafepointScope no_safepoint;
+    result ^= raw;
+    result.set_instructions(instructions);
+    result.set_instructions_size(instructions_size);
+    result.set_object_pool(object_pool);
+    result.set_pc_descriptors(Object::empty_descriptors());
+    result.set_instructions_binary_offset(instructions_offset);
+    result.set_source_positions_binary_offset(0);
+    result.set_local_variables_binary_offset(0);
+  }
+  return result.ptr();
+}
+
+ExternalTypedDataPtr Bytecode::GetBinary(Zone* zone) const {
+  const Function& func = Function::Handle(zone, function());
+  if (func.IsNull()) {
+    return ExternalTypedData::null();
+  }
+  const Script& script = Script::Handle(zone, func.script());
+  const KernelProgramInfo& info =
+      KernelProgramInfo::Handle(zone, script.kernel_program_info());
+  return info.metadata_payloads();
+}
+
+TokenPosition Bytecode::GetTokenIndexOfPC(uword return_address) const {
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
+  UNREACHABLE();
+#else
+  if (!HasSourcePositions()) {
+    return TokenPosition::kNoSource;
+  }
+  uword pc_offset = return_address - PayloadStart();
+  // pc_offset could equal to bytecode size if the last instruction is Throw.
+  ASSERT(pc_offset <= static_cast<uword>(Size()));
+  kernel::BytecodeSourcePositionsIterator iter(Thread::Current()->zone(),
+                                               *this);
+  TokenPosition token_pos = TokenPosition::kNoSource;
+  while (iter.MoveNext()) {
+    if (pc_offset <= iter.PcOffset()) {
+      break;
+    }
+    token_pos = iter.TokenPos();
+  }
+  return token_pos;
+#endif
+}
+
+intptr_t Bytecode::GetTryIndexAtPc(uword return_address) const {
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
+  UNREACHABLE();
+#else
+  intptr_t try_index = -1;
+  const uword pc_offset = return_address - PayloadStart();
+  const PcDescriptors& descriptors = PcDescriptors::Handle(pc_descriptors());
+  PcDescriptors::Iterator iter(descriptors, UntaggedPcDescriptors::kAnyKind);
+  while (iter.MoveNext()) {
+    // PC descriptors for try blocks in bytecode are generated in pairs,
+    // marking start and end of a try block.
+    // See BytecodeReaderHelper::ReadExceptionsTable for details.
+    const intptr_t current_try_index = iter.TryIndex();
+    const uword start_pc = iter.PcOffset();
+    if (pc_offset < start_pc) {
+      break;
+    }
+    const bool has_next = iter.MoveNext();
+    ASSERT(has_next);
+    const uword end_pc = iter.PcOffset();
+    if (start_pc <= pc_offset && pc_offset < end_pc) {
+      ASSERT(try_index < current_try_index);
+      try_index = current_try_index;
+    }
+  }
+  return try_index;
+#endif
+}
+
+uword Bytecode::GetFirstDebugCheckOpcodePc() const {
+#if defined(DART_PRECOMPILED_RUNTIME)
+  UNREACHABLE();
+#else
+  uword pc = PayloadStart();
+  const uword end_pc = pc + Size();
+  while (pc < end_pc) {
+    if (KernelBytecode::IsDebugCheckOpcode(
+            reinterpret_cast<const KBCInstr*>(pc))) {
+      return pc;
+    }
+    pc = KernelBytecode::Next(pc);
+  }
+  return 0;
+#endif
+}
+
+uword Bytecode::GetDebugCheckedOpcodeReturnAddress(uword from_offset,
+                                                   uword to_offset) const {
+#if defined(DART_PRECOMPILED_RUNTIME)
+  UNREACHABLE();
+#else
+  uword pc = PayloadStart() + from_offset;
+  const uword end_pc = pc + (to_offset - from_offset);
+  while (pc < end_pc) {
+    uword next_pc = KernelBytecode::Next(pc);
+    if (KernelBytecode::IsDebugCheckedOpcode(
+            reinterpret_cast<const KBCInstr*>(pc))) {
+      // Return the pc after the opcode, i.e. its 'return address'.
+      return next_pc;
+    }
+    pc = next_pc;
+  }
+  return 0;
+#endif
+}
+
+const char* Bytecode::ToCString() const {
+  return Thread::Current()->zone()->PrintToString("Bytecode(%s)",
+                                                  QualifiedName());
+}
+
+static const char* BytecodeStubName(const Bytecode& bytecode) {
+  if (bytecode.ptr() == Object::implicit_getter_bytecode().ptr()) {
+    return "[Bytecode Stub] VMInternal_ImplicitGetter";
+  } else if (bytecode.ptr() == Object::implicit_setter_bytecode().ptr()) {
+    return "[Bytecode Stub] VMInternal_ImplicitSetter";
+  } else if (bytecode.ptr() ==
+             Object::implicit_static_getter_bytecode().ptr()) {
+    return "[Bytecode Stub] VMInternal_ImplicitStaticGetter";
+  } else if (bytecode.ptr() == Object::method_extractor_bytecode().ptr()) {
+    return "[Bytecode Stub] VMInternal_MethodExtractor";
+  } else if (bytecode.ptr() == Object::invoke_closure_bytecode().ptr()) {
+    return "[Bytecode Stub] VMInternal_InvokeClosure";
+  } else if (bytecode.ptr() == Object::invoke_field_bytecode().ptr()) {
+    return "[Bytecode Stub] VMInternal_InvokeField";
+  }
+  return "[unknown stub]";
+}
+
+const char* Bytecode::Name() const {
+  Zone* zone = Thread::Current()->zone();
+  const Function& fun = Function::Handle(zone, function());
+  if (fun.IsNull()) {
+    return BytecodeStubName(*this);
+  }
+  const char* function_name =
+      String::Handle(zone, fun.UserVisibleName()).ToCString();
+  return zone->PrintToString("[Bytecode] %s", function_name);
+}
+
+const char* Bytecode::QualifiedName() const {
+  Zone* zone = Thread::Current()->zone();
+  const Function& fun = Function::Handle(zone, function());
+  if (fun.IsNull()) {
+    return BytecodeStubName(*this);
+  }
+  const char* function_name =
+      String::Handle(zone, fun.QualifiedScrubbedName()).ToCString();
+  return zone->PrintToString("[Bytecode] %s", function_name);
+}
+
+const char* Bytecode::FullyQualifiedName() const {
+  Zone* zone = Thread::Current()->zone();
+  const Function& fun = Function::Handle(zone, function());
+  if (fun.IsNull()) {
+    return BytecodeStubName(*this);
+  }
+  const char* function_name = fun.ToFullyQualifiedCString();
+  return zone->PrintToString("[Bytecode] %s", function_name);
+}
+
+bool Bytecode::SlowFindRawBytecodeVisitor::FindObject(ObjectPtr raw_obj) const {
+  return UntaggedBytecode::ContainsPC(raw_obj, pc_);
+}
+
+BytecodePtr Bytecode::FindCode(uword pc) {
+  Thread* thread = Thread::Current();
+  HeapIterationScope heap_iteration_scope(thread);
+  SlowFindRawBytecodeVisitor visitor(pc);
+  ObjectPtr needle = thread->heap()->FindOldObject(&visitor);
+  if (needle != Bytecode::null()) {
+    return static_cast<BytecodePtr>(needle);
+  }
+  return Bytecode::null();
+}
+
+LocalVarDescriptorsPtr Bytecode::GetLocalVarDescriptors() const {
+#if defined(PRODUCT) || defined(DART_PRECOMPILED_RUNTIME)
+  UNREACHABLE();
+  return LocalVarDescriptors::null();
+#else
+  Zone* zone = Thread::Current()->zone();
+  auto& var_descs = LocalVarDescriptors::Handle(zone, var_descriptors());
+  if (var_descs.IsNull()) {
+    const auto& func = Function::Handle(zone, function());
+    ASSERT(!func.IsNull());
+    var_descs =
+        kernel::BytecodeReader::ComputeLocalVarDescriptors(zone, func, *this);
+    ASSERT(!var_descs.IsNull());
+    set_var_descriptors(var_descs);
+  }
+  return var_descs.ptr();
+#endif
 }
 
 intptr_t Context::GetLevel() const {
@@ -21882,7 +22541,12 @@ bool TypeParameter::IsEquivalent(const Instance& other,
 }
 
 bool TypeParameter::IsRecursive(TrailPtr trail) const {
+#if !defined(DART_DYNAMIC_RUNTIME)
   if (AbstractType::Handle(bound()).IsRecursive(trail)) {
+#else
+  if (!AbstractType::Handle(bound()).IsNull() &&
+      AbstractType::Handle(bound()).IsRecursive(trail)) {
+#endif
     return true;
   }
   return false;
@@ -25717,6 +26381,7 @@ const char* StackTrace::ToCString() const {
   auto& function = Function::Handle(zone);
   auto& code_object = Object::Handle(zone);
   auto& code = Code::Handle(zone);
+  auto& bytecode = Bytecode::Handle(zone);
 
   NoSafepointScope no_allocation;
   GrowableArray<const Function*> inlined_functions;
@@ -25799,6 +26464,15 @@ const char* StackTrace::ToCString() const {
       }
 
       const uword pc_offset = stack_trace.PcOffsetAtFrame(i);
+      if (code_object.IsBytecode()) {
+        bytecode ^= code_object.ptr();
+        function = bytecode.function();
+        uword pc = bytecode.PayloadStart() + pc_offset;
+        auto const pos = bytecode.GetTokenIndexOfPC(pc);
+        PrintSymbolicStackFrame(zone, &buffer, function, pos, frame_index);
+        frame_index++;
+        continue;
+      }
       ASSERT(code_object.IsCode());
       code ^= code_object.ptr();
       ASSERT(code.IsFunctionCode());

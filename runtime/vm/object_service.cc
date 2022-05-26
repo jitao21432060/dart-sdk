@@ -805,6 +805,11 @@ void ExceptionHandlers::PrintJSONImpl(JSONStream* stream, bool ref) const {
   Object::PrintJSONImpl(stream, ref);
 }
 
+// PrintJSONImpl is a virtual method in super class. So we have to implement
+// a method for bytecode and parametertypecheck.
+void ParameterTypeCheck::PrintJSONImpl(JSONStream* stream, bool ref) const {}
+void Bytecode::PrintJSONImpl(JSONStream* stream, bool ref) const {}
+
 void SingleTargetCache::PrintJSONImpl(JSONStream* stream, bool ref) const {
   JSONObject jsobj(stream);
   AddCommonObjectProperties(&jsobj, "Object", ref);

@@ -61,7 +61,7 @@ declare_args() {
 
   # Whether the Dart binary version string should include the git hash and
   # git commit time.
-  dart_version_git_info = true
+  dart_version_git_info = false
 
   # Controls whether the VM is built as a static library or a shared library.
   if (is_fuchsia) {
@@ -81,6 +81,9 @@ declare_args() {
 
   # Whether to use compressed pointers.
   dart_use_compressed_pointers = false
+
+  # Whether to enable dynamicart mode.
+  dynamicart = false
 }
 
 declare_args() {

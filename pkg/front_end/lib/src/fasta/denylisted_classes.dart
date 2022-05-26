@@ -13,6 +13,15 @@ const List<String> denylistedCoreClasses = [
   "Null"
 ];
 
+const List<String> denylistedCoreClassesDynamicart = [
+  "bool",
+  "int",
+  "num",
+  "double",
+  "String",
+  "Null"
+];
+
 // List of special classes in dart:typed_data that can't be subclassed.
 const List<String> denylistedTypedDataClasses = [
   "ByteBuffer",
@@ -53,3 +62,5 @@ const List<String> denylistedTypedDataClasses = [
   "UnmodifiableUint8ClampedListView",
   "UnmodifiableUint8ListView",
 ];
+
+const List<String> denylistedTypedDataClassesDynamicart = [];

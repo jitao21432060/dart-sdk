@@ -5,9 +5,7 @@
 #ifndef RUNTIME_VM_COMPILER_AOT_PRECOMPILER_H_
 #define RUNTIME_VM_COMPILER_AOT_PRECOMPILER_H_
 
-#if defined(DART_PRECOMPILED_RUNTIME)
-#error "AOT runtime should not use compiler sources (including header files)"
-#endif  // defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME)
 
 #include "vm/allocation.h"
 #include "vm/compiler/aot/dispatch_table_generator.h"
@@ -299,6 +297,7 @@ class Precompiler : public ValueObject {
   void AddRoots();
   void AddAnnotatedRoots();
   void Iterate();
+  void DropKeepSdkEntry();
 
   void AddRetainReason(const Object& obj, const char* reason);
   void AddType(const AbstractType& type);
@@ -615,5 +614,30 @@ class Obfuscator {
 #endif  // defined(DART_PRECOMPILER) && !defined(TARGET_ARCH_IA32)
 
 }  // namespace dart
+#else
+#if defined(DART_DYNAMIC_RUNTIME)
+#include "vm/thread.h"
 
+namespace dart {
+class String;
+class GrowableObjectArray;
+class Thread;
+class Instance;
+
+class Obfuscator {
+ public:
+  Obfuscator(Thread* thread, const String& private_key) {}
+  ~Obfuscator() {}
+
+  StringPtr Rename(const String& name, bool atomic = false) {
+    return name.ptr();
+  }
+
+  void PreventRenaming(const String& name) {}
+
+  static void Deobfuscate(Thread* thread, const GrowableObjectArray& pieces) {}
+};
+}  // namespace dart
+#endif  // defined(DART_DYNAMIC_RUNTIME)
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 #endif  // RUNTIME_VM_COMPILER_AOT_PRECOMPILER_H_

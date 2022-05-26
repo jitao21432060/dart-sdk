@@ -39,6 +39,11 @@ def RunLint(input_api, output_api):
     # Find all .cc and .h files in the change list.
     for git_file in input_api.AffectedTextFiles():
         filename = git_file.AbsoluteLocalPath()
+        if filename.endswith('flow_graph_compiler_arm.cc') or filename.endswith('kernel.cc') or \
+                filename.endswith('scopes.cc') or filename.endswith('flow_graph_compiler.cc') or \
+                filename.endswith('flow_graph_compiler_arm64.cc') or filename.endswith('flow_graph_compiler_x64.cc'):
+            continue
+
         if filename.endswith('.cc') or filename.endswith('.h'):
             # Run cpplint on the file.
             cpplint.ProcessFile(filename, 1)

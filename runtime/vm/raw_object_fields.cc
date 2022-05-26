@@ -74,6 +74,7 @@ namespace dart {
   F(KernelProgramInfo, metadata_mappings_)                                     \
   F(KernelProgramInfo, scripts_)                                               \
   F(KernelProgramInfo, constants_)                                             \
+  F(KernelProgramInfo, bytecode_component_)                                    \
   F(KernelProgramInfo, potential_natives_)                                     \
   F(KernelProgramInfo, potential_pragma_functions_)                            \
   F(KernelProgramInfo, constants_table_)                                       \
@@ -91,8 +92,18 @@ namespace dart {
   F(Code, compressed_stackmaps_)                                               \
   F(Code, inlined_id_to_function_)                                             \
   F(Code, code_source_map_)                                                    \
+  F(Bytecode, object_pool_)                                                    \
+  F(Bytecode, instructions_)                                                   \
+  F(Bytecode, function_)                                                       \
+  F(Bytecode, exception_handlers_)                                             \
+  F(Bytecode, pc_descriptors_)                                                 \
+  F(Bytecode, closures_)                                                       \
   F(ExceptionHandlers, handled_types_data_)                                    \
   F(Context, parent_)                                                          \
+  F(ParameterTypeCheck, param_)                                                \
+  F(ParameterTypeCheck, type_or_bound_)                                        \
+  F(ParameterTypeCheck, name_)                                                 \
+  F(ParameterTypeCheck, cache_)                                                \
   F(SingleTargetCache, target_)                                                \
   F(UnlinkedCall, target_name_)                                                \
   F(UnlinkedCall, args_descriptor_)                                            \
@@ -222,6 +233,7 @@ namespace dart {
   F(Code, static_calls_target_table_)                                          \
   F(ICData, receivers_static_type_)                                            \
   F(Function, positional_parameter_names_)                                     \
+  F(Function, bytecode_)                                                       \
   F(Function, unoptimized_code_)                                               \
   F(Field, type_test_cache_)
 

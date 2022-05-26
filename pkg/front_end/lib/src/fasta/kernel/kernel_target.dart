@@ -380,7 +380,8 @@ class KernelTarget extends TargetImplementation {
     builder.mixedInTypeBuilder = null;
   }
 
-  Future<Component?> buildOutlines({CanonicalName? nameRoot}) async {
+  Future<Component?> buildOutlines(
+      {CanonicalName? nameRoot, bool? dynamicart}) async {
     if (loader.first == null) return null;
     return withCrashReporting<Component?>(() async {
       await loader.buildOutlines();
@@ -393,7 +394,7 @@ class KernelTarget extends TargetImplementation {
       loader.computeDefaultTypes(
           dynamicType, nullType, bottomType, objectClassBuilder);
       List<SourceClassBuilder> sourceClassBuilders =
-          loader.checkSemantics(objectClassBuilder);
+          loader.checkSemantics(objectClassBuilder, dynamicart: dynamicart);
       loader.computeMacroDeclarations(sourceClassBuilders);
       loader.finishTypeVariables(objectClassBuilder, dynamicType);
       loader.createTypeInferenceEngine();

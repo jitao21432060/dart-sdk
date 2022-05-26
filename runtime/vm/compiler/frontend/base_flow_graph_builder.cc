@@ -1160,11 +1160,15 @@ Fragment BaseFlowGraphBuilder::BuildEntryPointsIntrospection() {
   call_hook += Constant(closure);
   call_hook += Constant(function_name);
   call_hook += LoadLocal(entry_point_num);
+#if defined(DART_DYNAMIC_PRECOMPILER)
+  call_hook += Constant(Function::ZoneHandle(Z, closure.function()));
+#else
   if (FLAG_precompiled_mode) {
     call_hook += Constant(closure);
   } else {
     call_hook += Constant(Function::ZoneHandle(Z, closure.function()));
   }
+#endif
   call_hook += ClosureCall(TokenPosition::kNoSource,
                            /*type_args_len=*/0, /*argument_count=*/3,
                            /*argument_names=*/Array::ZoneHandle(Z));

@@ -130,7 +130,7 @@ class NativeEntry : public AllStatic {
   static void PropagateErrors(NativeArguments* arguments);
 };
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 class NativeEntryData : public ValueObject {
  public:
@@ -169,6 +169,7 @@ class NativeEntryData : public ValueObject {
 
   const TypedData& data_;
 
+  friend class Interpreter;
   friend class ObjectPoolSerializationCluster;
   DISALLOW_COPY_AND_ASSIGN(NativeEntryData);
 };

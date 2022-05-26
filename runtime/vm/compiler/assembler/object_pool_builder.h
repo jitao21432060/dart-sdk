@@ -37,6 +37,8 @@ struct ObjectPoolBuilderEntry {
     // values which become known only at run time.
     kSwitchableCallMissEntryPoint,
     kMegamorphicCallEntryPoint,
+    kNativeFunctionWrapper,
+    kNativeEntryData,
   };
 
   using TypeBits = BitField<uint8_t, EntryType, 0, 7>;

@@ -60,6 +60,7 @@ namespace dart {
   V(CloneContext)                                                              \
   V(CallToRuntime)                                                             \
   V(LazyCompile)                                                               \
+  V(InterpretCall)                                                             \
   V(CallBootstrapNative)                                                       \
   V(CallNoScopeNative)                                                         \
   V(CallAutoScopeNative)                                                       \
@@ -67,6 +68,7 @@ namespace dart {
   V(CallStaticFunction)                                                        \
   V(OptimizeFunction)                                                          \
   V(InvokeDartCode)                                                            \
+  V(InvokeDartCodeFromBytecode)                                                \
   V(DebugStepCheck)                                                            \
   V(SwitchableCallMiss)                                                        \
   V(MonomorphicSmiableCheck)                                                   \
@@ -141,8 +143,8 @@ namespace dart {
   V(InstantiateTypeArgumentsMayShareInstantiatorTA)                            \
   V(InstantiateTypeArgumentsMayShareFunctionTA)                                \
   V(NoSuchMethodDispatcher)                                                    \
-  V(UnknownDartCode)
-
+  V(UnknownDartCode)                                                           \
+  V(PatchFuntionCall)
 }  // namespace dart
 
 #endif  // RUNTIME_VM_STUB_CODE_LIST_H_

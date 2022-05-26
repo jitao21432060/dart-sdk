@@ -789,5 +789,208 @@ TableSelectorMetadata* TableSelectorMetadataForProgram(
 
 }  // namespace kernel
 }  // namespace dart
+#elif defined(DART_DYNAMIC_RUNTIME)
+#include "vm/kernel.h"
+#include "vm/bit_vector.h"
+#include "vm/compiler/frontend/kernel_translation_helper.h"
+#include "vm/compiler/frontend/bytecode_reader.h"
+
+namespace dart {
+namespace kernel {
+void ReadParameterCovariance(const Function& function,
+                     BitVector* is_covariant,
+                     BitVector* is_generic_covariant_impl) {
+  Thread* thread = Thread::Current();
+  Zone* zone = thread->zone();
+
+  const intptr_t num_params = function.NumParameters();
+  ASSERT(is_covariant->length() == num_params);
+  ASSERT(is_generic_covariant_impl->length() == num_params);
+
+  const auto& script = Script::Handle(zone, function.script());
+  TranslationHelper translation_helper(thread);
+  translation_helper.InitFromScript(script);
+
+  if (function.is_declared_in_bytecode()) {
+    BytecodeReaderHelper bytecode_reader_helper(&translation_helper, nullptr,
+                                                nullptr);
+    bytecode_reader_helper.ReadParameterCovariance(function, is_covariant,
+                                                   is_generic_covariant_impl);
+    return;
+  } else {
+    return;
+  }
+
+  KernelReaderHelper reader_helper(
+      zone, &translation_helper, script,
+      ExternalTypedData::Handle(zone, function.KernelData()),
+      function.KernelDataProgramOffset());
+
+  reader_helper.SetOffset(function.kernel_offset());
+  reader_helper.ReadUntilFunctionNode();
+
+  FunctionNodeHelper function_node_helper(&reader_helper);
+  function_node_helper.ReadUntilExcluding(
+      FunctionNodeHelper::kPositionalParameters);
+
+  // Positional.
+  const intptr_t num_positional_params = reader_helper.ReadListLength();
+  intptr_t param_index = function.NumImplicitParameters();
+  for (intptr_t i = 0; i < num_positional_params; ++i, ++param_index) {
+    VariableDeclarationHelper helper(&reader_helper);
+    helper.ReadUntilExcluding(VariableDeclarationHelper::kEnd);
+
+    if (helper.IsCovariant()) {
+      is_covariant->Add(param_index);
+    }
+    if (helper.IsGenericCovariantImpl()) {
+      is_generic_covariant_impl->Add(param_index);
+    }
+  }
+
+  // Named.
+  const intptr_t num_named_params = reader_helper.ReadListLength();
+  for (intptr_t i = 0; i < num_named_params; ++i, ++param_index) {
+    VariableDeclarationHelper helper(&reader_helper);
+    helper.ReadUntilExcluding(VariableDeclarationHelper::kEnd);
+
+    if (helper.IsCovariant()) {
+      is_covariant->Add(param_index);
+    }
+    if (helper.IsGenericCovariantImpl()) {
+      is_generic_covariant_impl->Add(param_index);
+    }
+  }
+}
+
+bool NeedsDynamicInvocationForwarder(const Function& function) {
+  Zone* zone = Thread::Current()->zone();
+
+  // Covariant parameters (both explicitly covariant and generic-covariant-impl)
+  // are checked in the body of a function and therefore don't need checks in a
+  // dynamic invocation forwarder. So dynamic invocation forwarder is only
+  // needed if there are non-covariant parameters of non-top type.
+
+  ASSERT(!function.IsImplicitGetterFunction());
+  if (function.IsImplicitSetterFunction()) {
+    const auto& field = Field::Handle(zone, function.accessor_field());
+    return !(field.is_covariant() || field.is_generic_covariant_impl());
+  }
+
+  const auto& type_params =
+      TypeParameters::Handle(zone, function.type_parameters());
+  if (!type_params.IsNull()) {
+    auto& bound = AbstractType::Handle(zone);
+    for (intptr_t i = 0, n = type_params.Length(); i < n; ++i) {
+      bound = type_params.BoundAt(i);
+      if (!bound.IsTopTypeForSubtyping() &&
+          !type_params.IsGenericCovariantImplAt(i)) {
+        return true;
+      }
+    }
+  }
+
+  const intptr_t num_params = function.NumParameters();
+  BitVector is_covariant(zone, num_params);
+  BitVector is_generic_covariant_impl(zone, num_params);
+  ReadParameterCovariance(function, &is_covariant, &is_generic_covariant_impl);
+
+  auto& type = AbstractType::Handle(zone);
+  for (intptr_t i = function.NumImplicitParameters(); i < num_params; ++i) {
+    type = function.ParameterTypeAt(i);
+    if (!type.IsTopTypeForSubtyping() &&
+        !is_generic_covariant_impl.Contains(i) && !is_covariant.Contains(i)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+KernelLineStartsReader::KernelLineStartsReader(
+    const dart::TypedData& line_starts_data,
+    dart::Zone* zone)
+    : line_starts_data_(line_starts_data) {
+  TypedDataElementType type = line_starts_data_.ElementType();
+  if (type == kInt8ArrayElement) {
+    helper_ = new KernelInt8LineStartsHelper();
+  } else if (type == kInt16ArrayElement) {
+    helper_ = new KernelInt16LineStartsHelper();
+  } else if (type == kInt32ArrayElement) {
+    helper_ = new KernelInt32LineStartsHelper();
+  } else {
+    UNREACHABLE();
+  }
+}
+
+bool KernelLineStartsReader::LocationForPosition(intptr_t position,
+                                         intptr_t* line,
+                                         intptr_t* col) const {
+  intptr_t line_count = line_starts_data_.Length();
+  intptr_t current_start = 0;
+  intptr_t previous_start = 0;
+  for (intptr_t i = 0; i < line_count; ++i) {
+    current_start += helper_->At(line_starts_data_, i);
+    if (current_start > position) {
+      *line = i;
+      if (col != nullptr) {
+        *col = position - previous_start + 1;
+      }
+      return true;
+    }
+    if (current_start == position) {
+      *line = i + 1;
+      if (col != nullptr) {
+        *col = 1;
+      }
+      return true;
+    }
+    previous_start = current_start;
+  }
+
+  return false;
+}
+
+bool KernelLineStartsReader::TokenRangeAtLine(
+    intptr_t line_number,
+    TokenPosition* first_token_index,
+    TokenPosition* last_token_index) const {
+  if (line_number < 0 || line_number > line_starts_data_.Length()) {
+    return false;
+  }
+  intptr_t cumulative = 0;
+  for (intptr_t i = 0; i < line_number; ++i) {
+    cumulative += helper_->At(line_starts_data_, i);
+  }
+  *first_token_index = dart::TokenPosition::Deserialize(cumulative);
+  if (line_number == line_starts_data_.Length()) {
+    *last_token_index = *first_token_index;
+  } else {
+    *last_token_index = dart::TokenPosition::Deserialize(
+        cumulative + helper_->At(line_starts_data_, line_number) - 1);
+  }
+  return true;
+}
+
+int32_t KernelLineStartsReader::KernelInt8LineStartsHelper::At(
+    const dart::TypedData& data,
+    intptr_t index) const {
+  return data.GetInt8(index);
+}
+
+int32_t KernelLineStartsReader::KernelInt16LineStartsHelper::At(
+    const dart::TypedData& data,
+    intptr_t index) const {
+  return data.GetInt16(index << 1);
+}
+
+int32_t KernelLineStartsReader::KernelInt32LineStartsHelper::At(
+    const dart::TypedData& data,
+    intptr_t index) const {
+  return data.GetInt32(index << 2);
+}
+
+}  // namespace kernel
+}  // namespace dart
 
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)

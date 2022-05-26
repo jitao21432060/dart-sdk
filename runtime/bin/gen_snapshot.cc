@@ -125,7 +125,9 @@ static const char* const kSnapshotKindNames[] = {
   V(obfuscate, obfuscate)                                                      \
   V(strip, strip)                                                              \
   V(verbose, verbose)                                                          \
-  V(version, version)
+  V(version, version)                                                          \
+  V(dynamicart, dynamicart)                                                    \
+  V(hot_update, hot_update)
 
 #define STRING_OPTION_DEFINITION(flag, variable)                               \
   static const char* variable = NULL;                                          \
@@ -325,6 +327,12 @@ static int ParseArguments(int argc,
           "Stripping can only be enabled when building an AOT snapshot.\n\n");
       return -1;
     }
+  }
+
+  if (dynamicart && !IsSnapshottingForPrecompilation()) {
+    Syslog::PrintErr(
+              "dynamicart can only be enabled when building AOT snapshot.\n\n");
+    return  -1;
   }
 
   return 0;
@@ -741,6 +749,8 @@ static int CreateIsolateAndSnapshot(const CommandLineOptions& inputs) {
                             kernel_buffer, kernel_buffer_size);
   if (IsSnapshottingForPrecompilation()) {
     isolate_flags.obfuscate = obfuscate;
+    isolate_flags.dynamicart = dynamicart;
+    isolate_flags.hot_update = hot_update;
   }
 
   auto isolate_group_data = std::unique_ptr<IsolateGroupData>(

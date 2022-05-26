@@ -9,6 +9,7 @@
 #include "vm/debugger.h"
 #include "vm/dispatch_table.h"
 #include "vm/heap/safepoint.h"
+#include "vm/interpreter.h"
 #include "vm/object_store.h"
 #include "vm/resolver.h"
 #include "vm/runtime_entry.h"
@@ -17,12 +18,14 @@
 #include "vm/symbols.h"
 #include "vm/zone_text_buffer.h"
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+#include "vm/compiler/frontend/bytecode_reader.h"
 #include "vm/compiler/jit/compiler.h"
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
 namespace dart {
 
+DECLARE_FLAG(bool, enable_interpreter);
 DECLARE_FLAG(bool, precompiled_mode);
 
 // A cache of VM heap allocated arguments descriptors.
@@ -127,8 +130,36 @@ ObjectPtr DartEntry::InvokeFunction(const Function& function,
   Zone* zone = thread->zone();
   ASSERT(thread->IsMutatorThread());
   ScopedIsolateStackLimits stack_limit(thread, current_sp);
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
   if (!function.HasCode()) {
+    if (FLAG_enable_interpreter && function.IsBytecodeAllowed(zone)) {
+      if (!function.HasBytecode()) {
+        ErrorPtr error =
+            kernel::BytecodeReader::ReadFunctionBytecode(thread, function);
+        if (error != Error::null()) {
+          return error;
+        }
+      }
+
+      // If we have bytecode but no native code then invoke the interpreter.
+      if (function.HasBytecode() && (FLAG_compilation_counter_threshold != 0)) {
+        ASSERT(thread->no_callback_scope_depth() == 0);
+        SuspendLongJumpScope suspend_long_jump_scope(thread);
+        TransitionToGenerated transition(thread);
+#if defined(DART_DYNAMIC_RUNTIME)
+          thread->isolate()->beginCallInterpreter();
+          ObjectPtr result = Interpreter::Current()->Call(function,
+                                                          arguments_descriptor,
+                                                          arguments,
+                                                          thread);
+          thread->isolate()->endCallInterpreter();
+          return result;
+#endif
+      }
+
+      // Fall back to compilation.
+    }
+
     const Object& result =
         Object::Handle(zone, Compiler::CompileFunction(thread, function));
     if (result.IsError()) {
@@ -183,6 +214,20 @@ ObjectPtr DartEntry::InvokeCode(const Code& code,
       reinterpret_cast<intptr_t>(&arguments),
       reinterpret_cast<intptr_t>(thread)));
 #else
+#if defined(DART_DYNAMIC_RUNTIME)
+  ObjectPtr result;
+  thread->isolate()->beginCallCompiled();
+  if (FLAG_precompiled_mode) {
+    result = static_cast<ObjectPtr>(
+        (reinterpret_cast<invokestub_bare_instructions>(stub))(
+            entry_point, arguments_descriptor, arguments, thread));
+  } else {
+    result = static_cast<ObjectPtr>((reinterpret_cast<invokestub>(stub))(
+        code, arguments_descriptor, arguments, thread));
+  }
+  thread->isolate()->endCallCompiled();
+  return result;
+#else
   if (FLAG_precompiled_mode) {
     return static_cast<ObjectPtr>(
         (reinterpret_cast<invokestub_bare_instructions>(stub))(
@@ -191,6 +236,7 @@ ObjectPtr DartEntry::InvokeCode(const Code& code,
     return static_cast<ObjectPtr>((reinterpret_cast<invokestub>(stub))(
         code, arguments_descriptor, arguments, thread));
   }
+#endif
 #endif
 }
 

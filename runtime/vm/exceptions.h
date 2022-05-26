@@ -208,7 +208,7 @@ class CatchEntryMove {
 
   static CatchEntryMove ReadFrom(ReadStream* stream);
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
   void WriteTo(BaseWriteStream* stream);
 #endif
 
