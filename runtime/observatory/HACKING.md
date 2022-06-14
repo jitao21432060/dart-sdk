@@ -15,12 +15,12 @@ We suggest to run all the test in __debug__ mode.
 
 First build the sdk in debug mode
 ```
-$ ./tools/build.py --mode debug create_sdk
+$ ./tool/build.py --mode debug create_sdk
 ```
 
 From the root of the sdk repository run:
 ```
-$ ./tools/test.py -mdebug service
+$ ./tool/test.py -mdebug service
 ```
 
 ## Serve Observatory
