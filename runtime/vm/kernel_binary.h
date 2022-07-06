@@ -5,7 +5,7 @@
 #ifndef RUNTIME_VM_KERNEL_BINARY_H_
 #define RUNTIME_VM_KERNEL_BINARY_H_
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 #include "platform/unaligned.h"
 #include "vm/kernel.h"

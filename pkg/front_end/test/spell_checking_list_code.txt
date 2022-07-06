@@ -45,6 +45,7 @@ annotate
 ansi
 answering
 anyone
+aot
 ap
 api
 apis
@@ -108,6 +109,7 @@ batch
 baz
 bazel
 bb
+bd
 became
 beforehand
 behave
@@ -388,6 +390,8 @@ dummy
 dupdate
 dyn
 dynamically
+dynamicdill
+dynamicart
 e
 easy
 ecma
@@ -579,6 +583,7 @@ history
 hit
 hoc
 hopefully
+hot
 href
 html
 https

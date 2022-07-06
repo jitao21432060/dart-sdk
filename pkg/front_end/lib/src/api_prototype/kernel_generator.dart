@@ -5,6 +5,8 @@
 /// Defines the front-end API for converting source code to Dart Kernel objects.
 library front_end.kernel_generator;
 
+import 'dart:async' show Future;
+
 import 'package:_fe_analyzer_shared/src/messages/codes.dart'
     show messageMissingMain, noLength;
 
@@ -45,26 +47,53 @@ import 'compiler_options.dart' show CompilerOptions;
 /// The input [source] is expected to be a script with a main method, otherwise
 /// an error is reported.
 // TODO(sigmund): rename to kernelForScript?
-Future<CompilerResult?> kernelForProgram(
-    Uri source, CompilerOptions options) async {
-  return (await kernelForProgramInternal(source, options));
+Future<CompilerResult?> kernelForProgram(Uri source, CompilerOptions options,
+    {bool? dynamicart}) async {
+  return (await kernelForProgramInternal(source, options,
+      dynamicart: dynamicart));
 }
 
 Future<CompilerResult?> kernelForProgramInternal(
     Uri source, CompilerOptions options,
-    {bool retainDataForTesting: false, bool requireMain: true}) async {
+    {bool retainDataForTesting: false,
+    bool requireMain: true,
+    bool? dynamicart}) async {
   ProcessedOptions pOptions =
       new ProcessedOptions(options: options, inputs: [source]);
   return await CompilerContext.runWithOptions(pOptions, (context) async {
     CompilerResult result = await generateKernelInternal(
         includeHierarchyAndCoreTypes: true,
-        retainDataForTesting: retainDataForTesting);
+        retainDataForTesting: retainDataForTesting,
+        dynamicart: dynamicart);
     Component? component = result.component;
     if (component == null) return null;
 
     if (requireMain && component.mainMethod == null) {
       context.options.report(
           messageMissingMain.withLocation(source, -1, noLength),
+          Severity.error);
+      return null;
+    }
+    return result;
+  });
+}
+
+Future<CompilerResult?> kernelForPrograms(
+    List<Uri> sources, CompilerOptions options,
+    {bool? dynamicart}) async {
+  ProcessedOptions pOptions =
+      new ProcessedOptions(options: options, inputs: sources);
+  return await CompilerContext.runWithOptions(pOptions, (context) async {
+    CompilerResult result = await generateKernelInternal(
+        includeHierarchyAndCoreTypes: true,
+        retainDataForTesting: false,
+        dynamicart: dynamicart);
+    Component? component = result.component;
+    if (component == null) return null;
+
+    if (component.mainMethod == null) {
+      context.options.report(
+          messageMissingMain.withLocation(sources[0], -1, noLength),
           Severity.error);
       return null;
     }

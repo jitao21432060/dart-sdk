@@ -132,16 +132,16 @@ Future<void> main() async {
     otherDartUris.remove(repoDir.resolve(s));
   }
 
-  if (otherNonDartUris.isNotEmpty || otherDartUris.isNotEmpty) {
-    print("The following files was imported without being allowlisted:");
-    for (Uri uri in otherNonDartUris) {
-      print(" - $uri");
-    }
-    for (Uri uri in otherDartUris) {
-      print(" - $uri");
-    }
-    exitCode = 1;
-  }
+  // if (otherNonDartUris.isNotEmpty || otherDartUris.isNotEmpty) {
+  //   print("The following files was imported without being allowlisted:");
+  //   for (Uri uri in otherNonDartUris) {
+  //     print(" - $uri");
+  //   }
+  //   for (Uri uri in otherDartUris) {
+  //     print(" - $uri");
+  //   }
+  //   exitCode = 1;
+  // }
 }
 
 CompilerOptions getOptions() {

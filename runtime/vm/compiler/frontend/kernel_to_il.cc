@@ -3129,10 +3129,14 @@ FlowGraph* FlowGraphBuilder::BuildGraphOfInvokeFieldDispatcher(
 
   if (is_closure_call) {
     body += LoadLocal(closure);
+#if defined(DART_DYNAMIC_PRECOMPILER)
+    body += LoadNativeField(Slot::Closure_function());
+#else
     if (!FLAG_precompiled_mode) {
       // Lookup the function in the closure.
       body += LoadNativeField(Slot::Closure_function());
     }
+#endif
     body += ClosureCall(TokenPosition::kNoSource, descriptor.TypeArgsLen(),
                         descriptor.Count(), *argument_names);
   } else {

@@ -18,6 +18,7 @@
 #include "platform/atomic.h"
 #include "vm/base_isolate.h"
 #include "vm/class_table.h"
+#include "vm/constants_kbc.h"
 #include "vm/dispatch_table.h"
 #include "vm/exceptions.h"
 #include "vm/field_table.h"
@@ -36,6 +37,11 @@
 #include "vm/thread_stack_resource.h"
 #include "vm/token_position.h"
 #include "vm/virtual_memory.h"
+#if defined(DART_DYNAMIC_RUNTIME)
+#include <string>
+#include <stack>
+#include <map>
+#endif
 
 #if !defined(DART_PRECOMPILED_RUNTIME)
 #include "vm/ffi_callback_trampolines.h"
@@ -57,6 +63,9 @@ class HandleScope;
 class HandleVisitor;
 class Heap;
 class ICData;
+#if !defined(DART_PRECOMPILED_RUNTIME)
+class Interpreter;
+#endif
 class IsolateObjectStore;
 class IsolateProfilerData;
 class ProgramReloadContext;
@@ -169,7 +178,9 @@ typedef FixedCache<intptr_t, CatchEntryMovesRefPtr, 16> CatchEntryMovesCache;
 
 #define BOOL_ISOLATE_FLAG_LIST_DEFAULT_GETTER(V)                               \
   V(PRODUCT, copy_parent_code, CopyParentCode, copy_parent_code, false)        \
-  V(PRODUCT, is_system_isolate, IsSystemIsolate, is_system_isolate, false)
+  V(PRODUCT, is_system_isolate, IsSystemIsolate, is_system_isolate, false)     \
+  V(PRECOMPILER, dynamicart, Dynamicart, dynamicart, false)                    \
+  V(PRECOMPILER, hot_update, HotUpdate, hot_update, false)
 
 // List of Isolate flags with custom getters named #name().
 //
@@ -540,7 +551,7 @@ class IsolateGroup : public IntrusiveDListEntry<IsolateGroup> {
   Mutex* unlinked_call_map_mutex() { return &unlinked_call_map_mutex_; }
 #endif
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
   Mutex* initializer_functions_mutex() { return &initializer_functions_mutex_; }
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
@@ -799,7 +810,8 @@ class IsolateGroup : public IntrusiveDListEntry<IsolateGroup> {
   V(UseFieldGuards)                                                            \
   V(UseOsr)                                                                    \
   V(SnapshotIsDontNeedSafe)                                                    \
-  V(BranchCoverage)
+  V(BranchCoverage)                                                            \
+  V(Dynamicart)
 
   // Isolate group specific flags.
   enum FlagBits {
@@ -903,7 +915,7 @@ class IsolateGroup : public IntrusiveDListEntry<IsolateGroup> {
   Mutex unlinked_call_map_mutex_;
 #endif
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
   Mutex initializer_functions_mutex_;
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
@@ -1437,6 +1449,55 @@ class Isolate : public BaseIsolate, public IntrusiveDListEntry<Isolate> {
   bool IsPrefixLoaded(const LibraryPrefix& prefix) const;
   void SetPrefixIsLoaded(const LibraryPrefix& prefix);
 
+#if defined(DART_DYNAMIC_RUNTIME)
+  DART_FORCE_INLINE void beginCallInterpreter() {
+    callStack.push(1);
+  }
+
+  DART_FORCE_INLINE void endCallInterpreter() {
+    callStack.pop();
+  }
+
+  DART_FORCE_INLINE void beginCallCompiled() {
+    callStack.push(0);
+  }
+
+  DART_FORCE_INLINE void endCallCompiled() {
+    callStack.pop();
+  }
+
+  DART_FORCE_INLINE bool getIsInInterpreter() {
+    if (callStack.empty()) {
+        return false;
+    }
+    return callStack.top() == 1;
+  }
+
+  DART_FORCE_INLINE void setIsReadBytecode(bool isIn) {
+    this->isReadBytecode = isIn;
+  }
+
+  DART_FORCE_INLINE bool getIsReadBytecode() {
+    return isReadBytecode;
+  }
+
+  DART_FORCE_INLINE void setIsAlignClass(bool isIn) {
+    this->isAlignClass = isIn;
+  }
+
+  DART_FORCE_INLINE bool getIsAlignClass() {
+    return isAlignClass;
+  }
+
+  DART_FORCE_INLINE std::map<std::string, int>* getPageKeys() {
+    return &pageKeys;
+  }
+
+  DART_FORCE_INLINE std::map<uword , FunctionPtr>* getPatchFunctionsMap() {
+    return &patchFunctionsMap;
+  }
+#endif
+
  private:
   friend class Dart;                  // Init, InitOnce, Shutdown.
   friend class IsolateKillerVisitor;  // Kill().
@@ -1530,6 +1591,13 @@ class Isolate : public BaseIsolate, public IntrusiveDListEntry<Isolate> {
 #if !defined(DART_PRECOMPILED_RUNTIME)
   NativeCallbackTrampolines native_callback_trampolines_;
 #endif
+#if defined(DART_DYNAMIC_RUNTIME)
+  std::stack<int> callStack;
+  bool isReadBytecode = false;
+  bool isAlignClass = false;
+  std::map<std::string, int> pageKeys;
+  std::map<uword, FunctionPtr> patchFunctionsMap;
+#endif
 
 #define ISOLATE_FLAG_BITS(V)                                                   \
   V(ErrorsFatal)                                                               \
@@ -1540,6 +1608,8 @@ class Isolate : public BaseIsolate, public IntrusiveDListEntry<Isolate> {
   V(HasAttemptedStepping)                                                      \
   V(ShouldPausePostServiceRequest)                                             \
   V(CopyParentCode)                                                            \
+  V(Dynamicart)                                                                \
+  V(HotUpdate)                                                                 \
   V(IsSystemIsolate)
 
   // Isolate specific flags.

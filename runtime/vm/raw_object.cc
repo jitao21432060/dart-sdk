@@ -531,6 +531,8 @@ COMPRESSED_VISITOR(TypeParameter)
 COMPRESSED_VISITOR(Function)
 COMPRESSED_VISITOR(Closure)
 COMPRESSED_VISITOR(LibraryPrefix)
+REGULAR_VISITOR(Bytecode)
+REGULAR_VISITOR(ParameterTypeCheck)
 REGULAR_VISITOR(SingleTargetCache)
 REGULAR_VISITOR(UnlinkedCall)
 NULL_VISITOR(MonomorphicSmiableCall)
@@ -655,6 +657,16 @@ intptr_t UntaggedCode::VisitCodePointers(CodePtr raw_obj,
 #endif
 }
 
+bool UntaggedBytecode::ContainsPC(ObjectPtr raw_obj, uword pc) {
+  if (raw_obj->IsBytecode()) {
+    BytecodePtr raw_bytecode = static_cast<BytecodePtr>(raw_obj);
+    uword start = raw_bytecode->untag()->instructions_;
+    uword size = raw_bytecode->untag()->instructions_size_;
+    return (pc - start) <= size;  // pc may point past last instruction.
+  }
+  return false;
+}
+
 intptr_t UntaggedObjectPool::VisitObjectPoolPointers(
     ObjectPoolPtr raw_obj,
     ObjectPointerVisitor* visitor) {
@@ -664,7 +676,8 @@ intptr_t UntaggedObjectPool::VisitObjectPoolPointers(
   for (intptr_t i = 0; i < length; ++i) {
     ObjectPool::EntryType entry_type =
         ObjectPool::TypeBits::decode(entry_bits[i]);
-    if (entry_type == ObjectPool::EntryType::kTaggedObject) {
+    if ((entry_type == ObjectPool::EntryType::kTaggedObject) ||
+        (entry_type == ObjectPool::EntryType::kNativeEntryData)) {
       visitor->VisitPointer(&entries[i].raw_obj_);
     }
   }

@@ -27,6 +27,7 @@
   V(Class)                                                                     \
   V(ClosureData)                                                               \
   V(Code)                                                                      \
+  V(Bytecode)                                                                  \
   V(CodeSourceMap)                                                             \
   V(CompressedStackMaps)                                                       \
   V(ContextScope)                                                              \
@@ -65,6 +66,7 @@
   V(RegExp)                                                                    \
   V(Script)                                                                    \
   V(Sentinel)                                                                  \
+  V(ParameterTypeCheck)                                                        \
   V(SendPort)                                                                  \
   V(SingleTargetCache)                                                         \
   V(Smi)                                                                       \

@@ -69,6 +69,13 @@ static FunctionPtr ResolveDynamicAnyArgsWithCustomLookup(
     }
     if (!function.IsNull()) return function.ptr();
 
+    // This can not be put in look up method. Otherwise, it may cause deadlock.
+#if defined(DART_DYNAMIC_RUNTIME)
+    if (!cls.is_finalized()) {
+      cls.EnsureIsFinalized(thread);
+    }
+#endif
+
     ASSERT(cls.is_finalized());
     {
       SafepointReadRwLocker ml(thread, thread->isolate_group()->program_lock());
@@ -80,6 +87,12 @@ static FunctionPtr ResolveDynamicAnyArgsWithCustomLookup(
       function =
           function.GetDynamicInvocationForwarder(function_name, allow_add);
     }
+#elif defined(DART_DYNAMIC_RUNTIME)
+   if (is_dyn_call && !function.IsNull() &&
+        function.is_declared_in_bytecode()) {
+      function =
+          function.GetDynamicInvocationForwarder(function_name, allow_add);
+    }
 #endif
     if (!function.IsNull()) return function.ptr();
 
@@ -88,12 +101,30 @@ static FunctionPtr ResolveDynamicAnyArgsWithCustomLookup(
       SafepointReadRwLocker ml(thread, thread->isolate_group()->program_lock());
       function = lookup(cls, demangled_getter_name);
       if (!function.IsNull()) {
+#if defined(DART_DYNAMIC_RUNTIME)
+        if (Thread::Current()->isolate()->getIsInInterpreter()) {
+          if (allow_add) {
+            need_to_create_method_extractor = true;
+            break;
+          } else {
+            return Function::null();
+          }
+        } else {
+           if (allow_add && FLAG_lazy_dispatchers) {
+              need_to_create_method_extractor = true;
+              break;
+           } else {
+              return Function::null();
+           }
+        }
+#else
         if (allow_add && FLAG_lazy_dispatchers) {
           need_to_create_method_extractor = true;
           break;
         } else {
           return Function::null();
         }
+#endif
       }
     }
     cls = cls.SuperClass();

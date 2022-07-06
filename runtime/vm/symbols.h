@@ -21,6 +21,7 @@ class ObjectPointerVisitor;
   V(AllocateInvocationMirror, "_allocateInvocationMirror")                     \
   V(AllocateInvocationMirrorForClosure, "_allocateInvocationMirrorForClosure") \
   V(AnonymousClosure, "<anonymous closure>")                                   \
+  V(AnonymousSignature, "<anonymous signature>")                               \
   V(ApiError, "ApiError")                                                      \
   V(ArgDescVar, ":arg_desc")                                                   \
   V(ArgumentError, "ArgumentError")                                            \
@@ -37,6 +38,7 @@ class ObjectPointerVisitor;
   V(ByteData, "ByteData")                                                      \
   V(ByteDataDot, "ByteData.")                                                  \
   V(ByteDataDot_view, "ByteData._view")                                        \
+  V(Bytecode, "Bytecode")                                                      \
   V(Call, "call")                                                              \
   V(CastError, "_CastError")                                                   \
   V(CheckLoaded, "_checkLoaded")                                               \
@@ -62,6 +64,7 @@ class ObjectPointerVisitor;
   V(DartCore, "dart:core")                                                     \
   V(DartDeveloper, "dart:developer")                                           \
   V(DartDeveloperTimeline, "dart.developer.timeline")                          \
+  V(DartExtensionScheme, "dart-ext:")                                          \
   V(DartFfi, "dart:ffi")                                                       \
   V(DartInternal, "dart:_internal")                                            \
   V(DartIsVM, "dart.isVM")                                                     \
@@ -77,6 +80,7 @@ class ObjectPointerVisitor;
   V(DartTypedData, "dart:typed_data")                                          \
   V(DartVMProduct, "dart.vm.product")                                          \
   V(DartVMService, "dart:_vmservice")                                          \
+  V(DartVMServiceIO, "dart:vmservice_io")                                      \
   V(DebugProcedureName, ":Eval")                                               \
   V(Default, "Default")                                                        \
   V(DefaultLabel, ":L")                                                        \
@@ -208,6 +212,7 @@ class ObjectPointerVisitor;
   V(Never, "Never")                                                            \
   V(NoSuchMethod, "noSuchMethod")                                              \
   V(NoSuchMethodError, "NoSuchMethodError")                                    \
+  V(NotNamed, "<not named>")                                                   \
   V(Null, "Null")                                                              \
   V(NullThrownError, "NullThrownError")                                        \
   V(Number, "num")                                                             \
@@ -218,6 +223,7 @@ class ObjectPointerVisitor;
   V(OriginalParam, ":original:")                                               \
   V(OutOfMemoryError, "OutOfMemoryError")                                      \
   V(PackageScheme, "package:")                                                 \
+  V(ParameterTypeCheck, "ParameterTypeCheck")                                  \
   V(Patch, "patch")                                                            \
   V(PatchClass, "PatchClass")                                                  \
   V(PcDescriptors, "PcDescriptors")                                            \
@@ -274,6 +280,7 @@ class ObjectPointerVisitor;
   V(UnwindError, "UnwindError")                                                \
   V(Value, "value")                                                            \
   V(Values, "values")                                                          \
+  V(_AsyncAwaitStart, "start")                                                 \
   V(WeakSerializationReference, "WeakSerializationReference")                  \
   V(_AsyncStarStreamController, "_AsyncStarStreamController")                  \
   V(_AsyncStreamController, "_AsyncStreamController")                          \
@@ -465,6 +472,7 @@ class ObjectPointerVisitor;
   V(vm_prefer_inline, "vm:prefer-inline")                                      \
   V(vm_entry_point, "vm:entry-point")                                          \
   V(vm_exact_result_type, "vm:exact-result-type")                              \
+  V(vm_inferred_type_metadata, "vm.inferred-type.metadata")                    \
   V(vm_never_inline, "vm:never-inline")                                        \
   V(vm_non_nullable_result_type, "vm:non-nullable-result-type")                \
   V(vm_notify_debugger_on_exception, "vm:notify-debugger-on-exception")        \

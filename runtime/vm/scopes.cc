@@ -828,4 +828,34 @@ LocalVarDescriptorsPtr LocalVarDescriptorsBuilder::Done() {
 
 }  // namespace dart
 
+#else
+#if defined(DART_DYNAMIC_RUNTIME)
+#include "vm/scopes.h"
+#include "vm/object.h"
+
+namespace dart {
+ContextScopePtr LocalScope::CreateImplicitClosureScope(const Function& func) {
+  static const intptr_t kNumCapturedVars = 1;
+
+  // Create a ContextScope with space for kNumCapturedVars descriptors.
+  const ContextScope& context_scope =
+      ContextScope::Handle(ContextScope::New(kNumCapturedVars, true));
+
+  // Create a descriptor for 'this' variable.
+  context_scope.SetTokenIndexAt(0, func.token_pos());
+  context_scope.SetDeclarationTokenIndexAt(0, func.token_pos());
+  context_scope.SetNameAt(0, Symbols::This());
+  context_scope.ClearFlagsAt(0);
+  context_scope.SetIsFinalAt(0, true);
+  context_scope.SetIsConstAt(0, false);
+  const AbstractType& type = AbstractType::Handle(func.ParameterTypeAt(0));
+  context_scope.SetTypeAt(0, type);
+  context_scope.SetContextIndexAt(0, 0);
+  context_scope.SetContextLevelAt(0, 0);
+  ASSERT(context_scope.num_variables() == kNumCapturedVars);  // Verify count.
+  return context_scope.ptr();
+}
+}  // namespace dart
+
+#endif
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)

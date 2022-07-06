@@ -90,7 +90,18 @@ void ClosureFunctionsCache::AddClosureFunctionLocked(
   ASSERT(!closures.IsNull());
   ASSERT(allow_implicit_closure_functions ||
          function.IsNonImplicitClosureFunction());
+#if defined(DART_DYNAMIC_RUNTIME)
+  if (closures.IsNull()) {
+    GrowableObjectArray& closure_dyn = GrowableObjectArray::Handle();
+    closure_dyn = GrowableObjectArray::New(4, Heap::kOld);
+    closure_dyn.Add(function);
+    object_store->set_closure_functions(closure_dyn);
+  } else {
+    closures.Add(function, Heap::kOld);
+  }
+#else
   closures.Add(function, Heap::kOld);
+#endif
 }
 
 intptr_t ClosureFunctionsCache::FindClosureIndex(const Function& needle) {

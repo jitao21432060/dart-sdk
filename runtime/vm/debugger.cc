@@ -757,7 +757,8 @@ ObjectPtr ActivationFrame::GetAsyncAwaiter(
     // Look up caller's closure on the stack.
     ObjectPtr* last_caller_obj = reinterpret_cast<ObjectPtr*>(GetCallerSp());
     Closure& closure = Closure::Handle();
-    closure = StackTraceUtils::FindClosureInFrame(last_caller_obj, function_);
+    closure = StackTraceUtils::FindClosureInFrame(last_caller_obj, function_,
+                                                  false);
 
     if (!closure.IsNull() && caller_closure_finder->IsRunningAsync(closure)) {
       closure = caller_closure_finder->FindCaller(closure);
@@ -816,7 +817,8 @@ bool ActivationFrame::HandlesException(const Instance& exc_obj) {
     CallerClosureFinder caller_closure_finder(Thread::Current()->zone());
     ObjectPtr* last_caller_obj = reinterpret_cast<ObjectPtr*>(GetCallerSp());
     Closure& closure = Closure::Handle(
-        StackTraceUtils::FindClosureInFrame(last_caller_obj, function()));
+        StackTraceUtils::FindClosureInFrame(last_caller_obj, function(),
+                                            false));
     if (!caller_closure_finder.IsRunningAsync(closure)) {
       return false;
     }
@@ -2034,7 +2036,8 @@ DebuggerStackTrace* DebuggerStackTrace::CollectAwaiterReturn() {
         ObjectPtr* last_caller_obj =
             reinterpret_cast<ObjectPtr*>(frame->GetCallerSp());
         closure =
-            StackTraceUtils::FindClosureInFrame(last_caller_obj, function);
+            StackTraceUtils::FindClosureInFrame(last_caller_obj, function,
+                                                false);
         if (caller_closure_finder.IsRunningAsync(closure)) {
           break;
         }

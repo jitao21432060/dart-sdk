@@ -8,6 +8,7 @@ import 'package:kernel/kernel.dart' show Component, writeComponentToText;
 import 'package:kernel/binary/ast_from_binary.dart'
     show BinaryBuilderWithMetadata;
 
+import 'package:vm/metadata/bytecode.dart' show BytecodeMetadataRepository;
 import 'package:vm/metadata/direct_call.dart' show DirectCallMetadataRepository;
 import 'package:vm/metadata/inferred_type.dart'
     show InferredTypeMetadataRepository;
@@ -47,6 +48,7 @@ main(List<String> arguments) async {
   component.addMetadataRepository(new TableSelectorMetadataRepository());
   component.addMetadataRepository(new UnboxingInfoMetadataRepository());
   component.addMetadataRepository(new UnreachableNodeMetadataRepository());
+  component.addMetadataRepository(new BytecodeMetadataRepository());
   component.addMetadataRepository(new CallSiteAttributesMetadataRepository());
   component.addMetadataRepository(new LoadingUnitsMetadataRepository());
 

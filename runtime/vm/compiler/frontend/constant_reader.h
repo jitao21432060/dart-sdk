@@ -5,13 +5,17 @@
 #ifndef RUNTIME_VM_COMPILER_FRONTEND_CONSTANT_READER_H_
 #define RUNTIME_VM_COMPILER_FRONTEND_CONSTANT_READER_H_
 
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
 #error "AOT runtime should not use compiler sources (including header files)"
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 
 #include "vm/compiler/frontend/kernel_translation_helper.h"
 #include "vm/hash_table.h"
 #include "vm/object.h"
+#if defined(DART_DYNAMIC_RUNTIME)
+#include "vm/symbols.h"
+#include "vm/class_finalizer.h"
+#endif
 
 namespace dart {
 namespace kernel {

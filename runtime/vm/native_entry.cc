@@ -273,8 +273,16 @@ void NativeEntry::LinkNativeCall(Dart_NativeArguments args) {
                                StackFrameIterator::kNoCrossThreadIteration);
     StackFrame* caller_frame = iterator.NextFrame();
 
-    Code& code = Code::Handle(zone, caller_frame->LookupDartCode());
-    Function& func = Function::Handle(zone, code.function());
+    Code& code = Code::Handle(zone);
+    Bytecode& bytecode = Bytecode::Handle(zone);
+    Function& func = Function::Handle(zone);
+    if (caller_frame->is_interpreted()) {
+      bytecode = caller_frame->LookupDartBytecode();
+      func = bytecode.function();
+    } else {
+      code = caller_frame->LookupDartCode();
+      func = code.function();
+    }
 
     if (FLAG_trace_natives) {
       THR_Print("Resolving native target for %s\n", func.ToCString());
@@ -300,16 +308,34 @@ void NativeEntry::LinkNativeCall(Dart_NativeArguments args) {
 #endif
 
     NativeFunction patch_target_function = target_function;
-    Code& trampoline = Code::Handle(zone);
-    if (is_bootstrap_native) {
-      trampoline = StubCode::CallBootstrapNative().ptr();
-    } else if (is_auto_scope) {
-      trampoline = StubCode::CallAutoScopeNative().ptr();
+    if (caller_frame->is_interpreted()) {
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+      ASSERT(FLAG_enable_interpreter);
+      NativeFunctionWrapper trampoline;
+      if (is_bootstrap_native) {
+        trampoline = &BootstrapNativeCallWrapper;
+      } else if (is_auto_scope) {
+        trampoline = &AutoScopeNativeCallWrapper;
+      } else {
+        trampoline = &NoScopeNativeCallWrapper;
+      }
+      KBCPatcher::PatchNativeCallAt(caller_frame->pc(), bytecode,
+                                    patch_target_function, trampoline);
+#else
+      UNREACHABLE();
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
     } else {
-      trampoline = StubCode::CallNoScopeNative().ptr();
+      Code& trampoline = Code::Handle(zone);
+      if (is_bootstrap_native) {
+        trampoline = StubCode::CallBootstrapNative().ptr();
+      } else if (is_auto_scope) {
+        trampoline = StubCode::CallAutoScopeNative().ptr();
+      } else {
+        trampoline = StubCode::CallNoScopeNative().ptr();
+      }
+      CodePatcher::PatchNativeCallAt(caller_frame->pc(), code,
+                                     patch_target_function, trampoline);
     }
-    CodePatcher::PatchNativeCallAt(caller_frame->pc(), code,
-                                   patch_target_function, trampoline);
 
     if (FLAG_trace_natives) {
       THR_Print("    -> %p (%s)\n", target_function,
@@ -334,7 +360,7 @@ void NativeEntry::LinkNativeCall(Dart_NativeArguments args) {
   }
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 // Note: not GC safe. Use with care.
 NativeEntryData::Payload* NativeEntryData::FromTypedArray(TypedDataPtr data) {

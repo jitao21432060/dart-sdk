@@ -47,9 +47,17 @@ void DescriptorList::AddDescriptor(UntaggedPcDescriptors::Kind kind,
 
   // When precompiling, we only use pc descriptors for exceptions,
   // relocations and yield indices.
+#if defined(DART_DYNAMIC_RUNTIME)
+  if (!FLAG_precompiled_mode || try_index != -1 ||
+      yield_index != UntaggedPcDescriptors::kInvalidYieldIndex ||
+      kind == UntaggedPcDescriptors::kBSSRelocation ||
+      Thread::Current()->isolate()->getIsReadBytecode()) {
+#else
   if (!FLAG_precompiled_mode || try_index != -1 ||
       yield_index != UntaggedPcDescriptors::kInvalidYieldIndex ||
       kind == UntaggedPcDescriptors::kBSSRelocation) {
+#endif
+
     const int32_t kind_and_metadata =
         UntaggedPcDescriptors::KindAndMetadata::Encode(kind, try_index,
                                                        yield_index);

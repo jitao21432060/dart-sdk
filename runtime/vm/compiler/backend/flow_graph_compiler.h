@@ -5,9 +5,7 @@
 #ifndef RUNTIME_VM_COMPILER_BACKEND_FLOW_GRAPH_COMPILER_H_
 #define RUNTIME_VM_COMPILER_BACKEND_FLOW_GRAPH_COMPILER_H_
 
-#if defined(DART_PRECOMPILED_RUNTIME)
-#error "AOT runtime should not use compiler sources (including header files)"
-#endif  // defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME)
 
 #include <functional>
 
@@ -974,6 +972,7 @@ class FlowGraphCompiler : public ValueObject {
   }
 
   Thread* thread() const { return thread_; }
+  Isolate* isolate() const { return thread_->isolate(); }
   IsolateGroup* isolate_group() const { return thread_->isolate_group(); }
   Zone* zone() const { return zone_; }
 
@@ -1297,5 +1296,21 @@ class FlowGraphCompiler : public ValueObject {
 };
 
 }  // namespace dart
+#else
+#if !defined(DART_DYNAMIC_RUNTIME)
+#error "AOT runtime should not use compiler sources (including header files)"
+#else
+#include "vm/flags.h"
+#include "vm/cpu.h"
 
+namespace dart {
+class FlowGraphCompiler : public ValueObject {
+    public:
+      static bool SupportsUnboxedDoubles();
+      static bool SupportsUnboxedSimd128();
+      static bool SupportsUnboxedInt64();
+};
+}
+#endif
+#endif  // defined(DART_PRECOMPILED_RUNTIME)
 #endif  // RUNTIME_VM_COMPILER_BACKEND_FLOW_GRAPH_COMPILER_H_

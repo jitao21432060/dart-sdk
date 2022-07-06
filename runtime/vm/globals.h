@@ -89,6 +89,17 @@ const intptr_t kDefaultNewGenSemiMaxSize = (kWordSize <= 4) ? 8 : 16;
 
 #if defined(DART_PRECOMPILED_RUNTIME)
 #define NOT_IN_PRECOMPILED(code)
+#else
+#define NOT_IN_PRECOMPILED(code) code
+#endif  // defined(DART_PRECOMPILED_RUNTIME)
+
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
+#define NOT_IN_PRECOMPILED_IN_DYNAMIC(code)
+#else
+#define NOT_IN_PRECOMPILED_IN_DYNAMIC(code) code
+#endif  // defined(DART_PRECOMPILED_RUNTIME)
+
+#if defined(DART_PRECOMPILED_RUNTIME)
 #define ONLY_IN_PRECOMPILED(code) code
 #else
 #define NOT_IN_PRECOMPILED(code) code

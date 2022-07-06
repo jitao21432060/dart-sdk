@@ -63,4 +63,8 @@ class ImplicitTypeArgument extends DartType {
   String toString() {
     return "ImplicitTypeArgument(${toStringInternal()})";
   }
+
+  String bdToString() {
+    return "${toStringInternal()}";
+  }
 }

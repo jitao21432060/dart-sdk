@@ -59,12 +59,32 @@ config("dart_precompiled_runtime_config") {
     "DART_PRECOMPILED_RUNTIME",
     "EXCLUDE_CFE_AND_KERNEL_PLATFORM",
   ]
+
+  # BD ADD: 只在dynamicart模式下增加DART_DYNAMIC_RUNTIME
+  if (dynamicart) {
+    print("DART_DYNAMIC_RUNTIME Enabled.")
+    defines += [ "FORCE_INCLUDE_DISASSEMBLER" ]
+    defines += [ "DART_DYNAMIC_RUNTIME" ]
+    if (dart_runtime_mode == "profile") {
+      print("DART_DYNAMIC_RUNTIME_PROFILE_FIR ENABLED")
+      defines += [ "DART_DYNAMIC_RUNTIME_PROFILE_FIR" ]
+    }
+  }
 }
 
 # Controls DART_PRECOMPILER #define.
 config("dart_precompiler_config") {
   defines = []
   defines += [ "DART_PRECOMPILER" ]
+  if (dynamicart) {
+    print("DART_DYNAMIC_PRECOMPILER Enabled.")
+    defines += [ "FORCE_INCLUDE_DISASSEMBLER" ]
+    defines += [ "DART_DYNAMIC_PRECOMPILER" ]
+    if (dart_runtime_mode == "profile") {
+      print("DART_DYNAMIC_RUNTIME_PROFILE ENABLED")
+      defines += [ "DART_DYNAMIC_RUNTIME_PROFILE" ]
+    }
+  }
 }
 
 config("dart_os_config") {

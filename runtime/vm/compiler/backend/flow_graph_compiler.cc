@@ -1,6 +1,7 @@
 // Copyright (c) 2013, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
+#if !defined(DART_DYNAMIC_RUNTIME)
 
 #include "vm/compiler/backend/flow_graph_compiler.h"
 #include "vm/globals.h"  // Needed here to get TARGET_ARCH_XXX.
@@ -2431,7 +2432,8 @@ bool FlowGraphCompiler::GenerateSubtypeRangeCheck(Register class_id_reg,
         hi->SubtypeRangesForClass(type_class,
                                   /*include_abstract=*/false,
                                   /*exclude_null=*/false);
-    if (ranges.length() <= kMaxNumberOfCidRangesToTest) {
+    if (ranges.length() <= (Thread::Current()->is_dynamicart() ? -1 :
+                                               kMaxNumberOfCidRangesToTest)) {
       GenerateCidRangesCheck(assembler(), class_id_reg, ranges, is_subtype);
       return true;
     }
@@ -3675,3 +3677,13 @@ bool FlowGraphCompiler::CanPcRelativeCall(const AbstractType& target) const {
 #undef __
 
 }  // namespace dart
+#else
+#include "vm/compiler/backend/flow_graph_compiler.h"
+
+namespace dart {
+DEFINE_FLAG(bool,
+            enable_simd_inline,
+            true,
+            "Enable inlining of SIMD related method calls.");
+}
+#endif  // !defined(DART_DYNAMIC_RUNTIME)

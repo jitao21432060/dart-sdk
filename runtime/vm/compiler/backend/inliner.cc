@@ -97,6 +97,72 @@ DECLARE_FLAG(bool, print_flow_graph_optimized);
                                     instance_call, comment));                  \
     }                                                                          \
   } while (false)
+static bool isDynamicart() {
+  return Thread::Current()->is_dynamicart();
+}
+static int inline_getters_setters_smaller_than() {
+  if (isDynamicart()) {
+    return  0;
+  }
+  return FLAG_inline_getters_setters_smaller_than;
+}
+static int inlining_depth_threshold() {
+  if (isDynamicart()) {
+    return  0;
+  }
+  return FLAG_inlining_depth_threshold;
+}
+
+static int inlining_size_threshold() {
+  if (isDynamicart()) {
+    return 0;
+  }
+  return FLAG_inlining_size_threshold;
+}
+static int inlining_callee_call_sites_threshold() {
+  if (isDynamicart()) {
+        return  0;
+  }
+  return FLAG_inlining_callee_call_sites_threshold;
+}
+static int inlining_callee_size_threshold() {
+  if (isDynamicart()) {
+    return  0;
+  }
+   return FLAG_inlining_callee_size_threshold;
+}
+static int inlining_small_leaf_size_threshold() {
+  if (isDynamicart()) {
+    return  0;
+  }
+  return FLAG_inlining_small_leaf_size_threshold;
+}
+static int inlining_caller_size_threshold() {
+  if (isDynamicart()) {
+    return  0;
+  }
+  return FLAG_inlining_caller_size_threshold;
+}
+
+static int inlining_hotness() {
+  if (isDynamicart()) {
+    return  0;
+  }
+  return FLAG_inlining_hotness;
+}
+static int inlining_recursion_depth_threshold() {
+  if (isDynamicart()) {
+    return  0;
+  }
+  return FLAG_inlining_recursion_depth_threshold;
+}
+
+static int max_inlined_per_depth() {
+  if (isDynamicart()) {
+    return 0;
+  }
+  return FLAG_max_inlined_per_depth;
+}
 
 // Test and obtain Smi value.
 static bool IsSmiValue(Value* val, intptr_t* int_val) {
@@ -562,7 +628,7 @@ static bool IsSmallLeaf(FlowGraph* graph) {
       }
     }
   }
-  return instruction_count <= FLAG_inlining_small_leaf_size_threshold;
+  return instruction_count <= inlining_small_leaf_size_threshold();
 }
 
 struct InlinedCallData {
@@ -610,6 +676,7 @@ class PolymorphicInliner : public ValueObject {
   TargetEntryInstr* BuildDecisionGraph();
 
   IsolateGroup* isolate_group() const;
+  Isolate* isolate() const;
   Zone* zone() const;
   intptr_t AllocateBlockId() const;
   inline bool trace_inlining() const;
@@ -884,6 +951,7 @@ class CallSiteInliner : public ValueObject {
   FlowGraph* caller_graph() const { return caller_graph_; }
 
   Thread* thread() const { return caller_graph_->thread(); }
+  Isolate* isolate() const { return caller_graph_->isolate(); }
   Zone* zone() const { return caller_graph_->zone(); }
 
   bool trace_inlining() const { return inliner_->trace_inlining(); }
@@ -909,10 +977,10 @@ class CallSiteInliner : public ValueObject {
     // Pragma or size heuristics.
     if (inliner_->AlwaysInline(callee)) {
       return InliningDecision::Yes("AlwaysInline");
-    } else if (inlined_size_ > FLAG_inlining_caller_size_threshold) {
+    } else if (inlined_size_ > inlining_caller_size_threshold()) {
       // Prevent caller methods becoming humongous and thus slow to compile.
       return InliningDecision::No("--inlining-caller-size-threshold");
-    } else if (instr_count > FLAG_inlining_callee_size_threshold) {
+    } else if (instr_count > inlining_callee_size_threshold()) {
       // Prevent inlining of callee methods that exceed certain size.
       return InliningDecision::No("--inlining-callee-size-threshold");
     }
@@ -920,7 +988,7 @@ class CallSiteInliner : public ValueObject {
     const int callee_inlining_depth = callee.inlining_depth();
     if (callee_inlining_depth > 0 &&
         ((callee_inlining_depth + inlining_depth_) >
-         FLAG_inlining_depth_threshold)) {
+                inlining_depth_threshold())) {
       return InliningDecision::No("--inlining-depth-threshold");
     }
     // Situation instr_count == 0 denotes no counts have been computed yet.
@@ -928,9 +996,9 @@ class CallSiteInliner : public ValueObject {
     // late heuristic.
     if (instr_count == 0) {
       return InliningDecision::Yes("need to count first");
-    } else if (instr_count <= FLAG_inlining_size_threshold) {
+    } else if (instr_count <= inlining_size_threshold()) {
       return InliningDecision::Yes("--inlining-size-threshold");
-    } else if (call_site_count <= FLAG_inlining_callee_call_sites_threshold) {
+    } else if (call_site_count <= inlining_callee_call_sites_threshold()) {
       return InliningDecision::Yes("--inlining-callee-call-sites-threshold");
     }
     return InliningDecision::No("default");
@@ -959,9 +1027,9 @@ class CallSiteInliner : public ValueObject {
         THR_Print("**Depth % " Pd " calls to inline %" Pd " (threshold % " Pd
                   ")\n",
                   inlining_depth_, collected_call_sites_->NumCalls(),
-                  static_cast<intptr_t>(FLAG_max_inlined_per_depth));
+                  static_cast<intptr_t>(max_inlined_per_depth()));
       }
-      if (collected_call_sites_->NumCalls() > FLAG_max_inlined_per_depth) {
+      if (collected_call_sites_->NumCalls() > max_inlined_per_depth()) {
         break;
       }
       // Swap collected and inlining arrays and clear the new collecting array.
@@ -1133,7 +1201,7 @@ class CallSiteInliner : public ValueObject {
     // Added 'volatile' works around a possible GCC 4.9 compiler bug.
     volatile bool is_recursive_call = IsCallRecursive(function, call);
     if (is_recursive_call &&
-        inlining_recursion_depth_ >= FLAG_inlining_recursion_depth_threshold) {
+        inlining_recursion_depth_ >= inlining_recursion_depth_threshold()) {
       TRACE_INLINING(THR_Print("     Bailout: recursive function\n"));
       PRINT_INLINING_TREE("Recursive function", &call_data->caller, &function,
                           call_data->call);
@@ -1590,7 +1658,7 @@ class CallSiteInliner : public ValueObject {
 
       const Function& target = call->function();
       if (!inliner_->AlwaysInline(target) &&
-          (call_info[call_idx].ratio * 100) < FLAG_inlining_hotness) {
+          (call_info[call_idx].ratio * 100) < inlining_hotness()) {
         if (trace_inlining()) {
           String& name = String::Handle(target.QualifiedUserVisibleName());
           THR_Print("  => %s (deopt count %d)\n     Bailout: cold %f\n",
@@ -2294,7 +2362,7 @@ bool PolymorphicInliner::Inline() {
                             non_inlined_variants_->length() == 0;
 
     intptr_t size = target.optimized_instruction_count();
-    bool small = (size != 0 && size < FLAG_inlining_size_threshold);
+    bool small = (size != 0 && size < inlining_size_threshold());
 
     // If it's less than 3% of the dispatches, we won't even consider
     // checking for the class ID and branching to another already-inlined
@@ -2481,7 +2549,7 @@ bool FlowGraphInliner::AlwaysInline(const Function& function) {
       IsInlineableOperator(function) ||
       (function.kind() == UntaggedFunction::kConstructor)) {
     const intptr_t count = function.optimized_instruction_count();
-    if ((count != 0) && (count < FLAG_inline_getters_setters_smaller_than)) {
+    if ((count != 0) && (count < inline_getters_setters_smaller_than())) {
       return true;
     }
   }
@@ -2518,9 +2586,7 @@ int FlowGraphInliner::Inline() {
     printer.PrintBlocks();
   }
 
-  intptr_t inlining_depth_threshold = FLAG_inlining_depth_threshold;
-
-  CallSiteInliner inliner(this, inlining_depth_threshold);
+  CallSiteInliner inliner(this, inlining_depth_threshold());
   inliner.InlineCalls();
   if (FLAG_print_inlining_tree) {
     inliner.PrintInlinedInfo(top);

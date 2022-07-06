@@ -36,6 +36,34 @@ String? getExternalName(CoreTypes coreTypes, Member procedure) {
   return null;
 }
 
+/// Returns native extension URIs for given [library].
+List<String> getNativeExtensionUris(Library library) {
+  final List<String> uris = <String>[];
+  for (Expression annotation in library.annotations) {
+    final String? value = _getExternalNameValueBD(annotation);
+    if (value != null) {
+      uris.add(value);
+    }
+  }
+  return uris;
+}
+
+String? _getExternalNameValueBD(Expression annotation) {
+  if (annotation is ConstructorInvocation) {
+    if (_isExternalName(annotation.target.enclosingClass)) {
+      return (annotation.arguments.positional.single as StringLiteral).value;
+    }
+  } else if (annotation is ConstantExpression) {
+    final Constant constant = annotation.constant;
+    if (constant is InstanceConstant) {
+      if (_isExternalName(constant.classNode)) {
+        return (constant.fieldValues.values.single as StringConstant).value;
+      }
+    }
+  }
+  return null;
+}
+
 String? _getExternalNameValue(CoreTypes coreTypes, Expression annotation) {
   if (annotation is ConstantExpression) {
     final Constant constant = annotation.constant;

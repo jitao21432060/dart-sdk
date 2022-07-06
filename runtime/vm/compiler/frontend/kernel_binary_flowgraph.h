@@ -54,6 +54,8 @@ class StreamingFlowGraphBuilder : public KernelReaderHelper {
 
   Fragment BuildStatementAt(intptr_t kernel_offset);
 
+  bool CanReplaceStaticCall(const Function& function);
+
  private:
   Thread* thread() const { return flow_graph_builder_->thread_; }
 

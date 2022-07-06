@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/globals.h"  // Needed here to get TARGET_ARCH_ARM.
-#if defined(TARGET_ARCH_ARM)
+#if defined(TARGET_ARCH_ARM) && !defined(DART_DYNAMIC_RUNTIME)
 
 #include "vm/compiler/backend/flow_graph_compiler.h"
 
@@ -335,6 +335,37 @@ void FlowGraphCompiler::EmitFrameEntry() {
     } else {
       ASSERT(StackSize() >= 0);
       __ EnterDartFrame(StackSize() * compiler::target::kWordSize);
+      if (thread()->is_dynamicart() && thread()->is_hotupdate()) {
+          if (strstr(function.ToFullyQualifiedCString(), "package:flutter/") ||
+                strstr(function.ToFullyQualifiedCString(), "dart:")) {
+              return;
+          }
+          UntaggedFunction::Kind kind = function.kind();
+          bool isPrivateFunc =
+              Library::IsPrivate(String::Handle(function.name()));
+          bool isStatic = function.is_static();
+          bool isHasImplicitClosureFunction =
+              function.HasImplicitClosureFunction();
+          if (kind != UntaggedFunction::kConstructor && !isPrivateFunc &&
+                !isStatic && !isHasImplicitClosureFunction) {
+              return;
+          }
+          compiler::Label aotPath;
+          __ Push(R0);
+          __ ldr(R0,
+                 compiler::Address(THR, 852));
+          __ blx(R0);
+
+          __ CompareClassId(R0, kNullCid, TMP);
+          __ b(&aotPath, EQ);
+
+          __ LeaveFrame((1 << FP) | (1 << R14));
+          __ Branch(compiler::FieldAddress(R0,
+                             compiler::target::Function::entry_point_offset()));
+
+          __ Bind(&aotPath);
+          __ Pop(R0);
+      }
     }
   } else if (FLAG_precompiled_mode) {
     assembler()->set_constant_pool_allowed(true);
@@ -1285,5 +1316,24 @@ void ParallelMoveResolver::RestoreFpuScratch(FpuRegister reg) {
 #undef __
 
 }  // namespace dart
+#else
+#if defined(TARGET_ARCH_ARM)
+#include "vm/compiler/backend/flow_graph_compiler.h"
 
+namespace dart {
+
+DEFINE_FLAG(bool, unbox_doubles, true, "Optimize double arithmetic.");
+DEFINE_FLAG(bool, unbox_mints, true, "Optimize 64-bit integer arithmetic.");
+DECLARE_FLAG(bool, enable_simd_inline);
+bool FlowGraphCompiler::SupportsUnboxedDoubles() {
+  return FLAG_unbox_doubles;
+}
+bool FlowGraphCompiler::SupportsUnboxedSimd128() {
+  return TargetCPUFeatures::neon_supported() && FLAG_enable_simd_inline;
+}
+bool FlowGraphCompiler::SupportsUnboxedInt64() {
+  return FLAG_unbox_mints;
+}
+}  // namespace dart
+#endif
 #endif  // defined(TARGET_ARCH_ARM)

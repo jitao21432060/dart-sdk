@@ -1,6 +1,7 @@
 // Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
+#if !defined(DART_PRECOMPILED_RUNTIME)
 
 #include "vm/compiler/frontend/kernel_binary_flowgraph.h"
 
@@ -2235,18 +2236,43 @@ Fragment StreamingFlowGraphBuilder::BuildInstanceGet(TokenPosition* p) {
     instructions += CheckNull(position, receiver, getter_name);
   }
 
-  if (!direct_call.target_.IsNull()) {
-    ASSERT(CompilerState::Current().is_aot());
-    instructions +=
-        StaticCall(position, direct_call.target_, 1, Array::null_array(),
-                   ICData::kNoRebind, &result_type);
+  if (thread()->is_dynamicart()) {
+    if (!direct_call.target_.IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      if (CanReplaceStaticCall(direct_call.target_)) {
+        instructions +=
+            StaticCall(position, direct_call.target_, 1, Array::null_array(),
+                       ICData::kNoRebind, &result_type);
+      } else {
+        const intptr_t kTypeArgsLen = 0;
+        const intptr_t kNumArgsChecked = 1;
+        instructions +=
+            InstanceCall(position, getter_name, Token::kGET, kTypeArgsLen, 1,
+                         Array::null_array(), kNumArgsChecked, interface_target,
+                         Function::null_function(), &result_type);
+      }
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+      instructions +=
+          InstanceCall(position, getter_name, Token::kGET, kTypeArgsLen, 1,
+                       Array::null_array(), kNumArgsChecked, interface_target,
+                       Function::null_function(), &result_type);
+    }
   } else {
-    const intptr_t kTypeArgsLen = 0;
-    const intptr_t kNumArgsChecked = 1;
-    instructions +=
-        InstanceCall(position, getter_name, Token::kGET, kTypeArgsLen, 1,
-                     Array::null_array(), kNumArgsChecked, interface_target,
-                     Function::null_function(), &result_type);
+    if (!direct_call.target_.IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      instructions +=
+          StaticCall(position, direct_call.target_, 1, Array::null_array(),
+                     ICData::kNoRebind, &result_type);
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+      instructions +=
+          InstanceCall(position, getter_name, Token::kGET, kTypeArgsLen, 1,
+                       Array::null_array(), kNumArgsChecked, interface_target,
+                       Function::null_function(), &result_type);
+    }
   }
 
   if (direct_call.check_receiver_for_null_) {
@@ -2289,19 +2315,43 @@ Fragment StreamingFlowGraphBuilder::BuildDynamicGet(TokenPosition* p) {
     direct_call_target = &Function::ZoneHandle(
         direct_call.target_.GetDynamicInvocationForwarder(mangled_name));
   }
-
-  if (!direct_call_target->IsNull()) {
-    ASSERT(CompilerState::Current().is_aot());
-    instructions +=
-        StaticCall(position, *direct_call_target, 1, Array::null_array(),
-                   ICData::kNoRebind, &result_type);
+  if (thread()->is_dynamicart()) {
+    if (!direct_call_target->IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      if (CanReplaceStaticCall(direct_call.target_)) {
+        instructions +=
+                  StaticCall(position, *direct_call_target, 1,
+                       Array::null_array(), ICData::kNoRebind, &result_type);
+      } else {
+        const intptr_t kTypeArgsLen = 0;
+        const intptr_t kNumArgsChecked = 1;
+        instructions += InstanceCall(position, mangled_name, Token::kGET,
+                                     kTypeArgsLen, 1, Array::null_array(),
+                                     kNumArgsChecked, Function::null_function(),
+                                     Function::null_function(), &result_type);
+      }
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+      instructions += InstanceCall(position, mangled_name, Token::kGET,
+                                   kTypeArgsLen, 1, Array::null_array(),
+                                   kNumArgsChecked, Function::null_function(),
+                                   Function::null_function(), &result_type);
+    }
   } else {
-    const intptr_t kTypeArgsLen = 0;
-    const intptr_t kNumArgsChecked = 1;
-    instructions += InstanceCall(position, mangled_name, Token::kGET,
-                                 kTypeArgsLen, 1, Array::null_array(),
-                                 kNumArgsChecked, Function::null_function(),
-                                 Function::null_function(), &result_type);
+    if (!direct_call_target->IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      instructions +=
+          StaticCall(position, *direct_call_target, 1, Array::null_array(),
+                     ICData::kNoRebind, &result_type);
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+      instructions += InstanceCall(position, mangled_name, Token::kGET,
+                                   kTypeArgsLen, 1, Array::null_array(),
+                                   kNumArgsChecked, Function::null_function(),
+                                   Function::null_function(), &result_type);
+    }
   }
 
   if (direct_call.check_receiver_for_null_) {
@@ -2343,18 +2393,43 @@ Fragment StreamingFlowGraphBuilder::BuildInstanceTearOff(TokenPosition* p) {
     instructions += CheckNull(position, receiver, getter_name);
   }
 
-  if (!direct_call.target_.IsNull()) {
-    ASSERT(CompilerState::Current().is_aot());
-    instructions +=
-        StaticCall(position, direct_call.target_, 1, Array::null_array(),
-                   ICData::kNoRebind, &result_type);
+  if (thread()->is_dynamicart()) {
+    if (!direct_call.target_.IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      if (CanReplaceStaticCall(direct_call.target_)) {
+        instructions +=
+            StaticCall(position, direct_call.target_, 1, Array::null_array(),
+                       ICData::kNoRebind, &result_type);
+      } else {
+        const intptr_t kTypeArgsLen = 0;
+        const intptr_t kNumArgsChecked = 1;
+        instructions += InstanceCall(position, getter_name, Token::kGET,
+                                     kTypeArgsLen, 1, Array::null_array(),
+                                     kNumArgsChecked, Function::null_function(),
+                                     tearoff_interface_target, &result_type);
+      }
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+      instructions += InstanceCall(position, getter_name, Token::kGET,
+                                   kTypeArgsLen, 1, Array::null_array(),
+                                   kNumArgsChecked, Function::null_function(),
+                                   tearoff_interface_target, &result_type);
+    }
   } else {
-    const intptr_t kTypeArgsLen = 0;
-    const intptr_t kNumArgsChecked = 1;
-    instructions += InstanceCall(position, getter_name, Token::kGET,
-                                 kTypeArgsLen, 1, Array::null_array(),
-                                 kNumArgsChecked, Function::null_function(),
-                                 tearoff_interface_target, &result_type);
+    if (!direct_call.target_.IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      instructions +=
+          StaticCall(position, direct_call.target_, 1, Array::null_array(),
+                     ICData::kNoRebind, &result_type);
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+      instructions += InstanceCall(position, getter_name, Token::kGET,
+                                   kTypeArgsLen, 1, Array::null_array(),
+                                   kNumArgsChecked, Function::null_function(),
+                                   tearoff_interface_target, &result_type);
+    }
   }
 
   if (direct_call.check_receiver_for_null_) {
@@ -2387,18 +2462,43 @@ Fragment StreamingFlowGraphBuilder::BuildFunctionTearOff(TokenPosition* p) {
     instructions += CheckNull(position, receiver, Symbols::GetCall());
   }
 
-  if (!direct_call.target_.IsNull()) {
-    ASSERT(CompilerState::Current().is_aot());
-    instructions +=
-        StaticCall(position, direct_call.target_, 1, Array::null_array(),
-                   ICData::kNoRebind, &result_type);
+  if (thread()->is_dynamicart()) {
+    if (!direct_call.target_.IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      if (CanReplaceStaticCall(direct_call.target_)) {
+        instructions +=
+            StaticCall(position, direct_call.target_, 1, Array::null_array(),
+                       ICData::kNoRebind, &result_type);
+      } else {
+        const intptr_t kTypeArgsLen = 0;
+        const intptr_t kNumArgsChecked = 1;
+        instructions += InstanceCall(position, Symbols::GetCall(), Token::kGET,
+                                     kTypeArgsLen, 1, Array::null_array(),
+                                     kNumArgsChecked, Function::null_function(),
+                                     Function::null_function(), &result_type);
+      }
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+      instructions += InstanceCall(position, Symbols::GetCall(), Token::kGET,
+                                   kTypeArgsLen, 1, Array::null_array(),
+                                   kNumArgsChecked, Function::null_function(),
+                                   Function::null_function(), &result_type);
+    }
   } else {
-    const intptr_t kTypeArgsLen = 0;
-    const intptr_t kNumArgsChecked = 1;
-    instructions += InstanceCall(position, Symbols::GetCall(), Token::kGET,
-                                 kTypeArgsLen, 1, Array::null_array(),
-                                 kNumArgsChecked, Function::null_function(),
-                                 Function::null_function(), &result_type);
+    if (!direct_call.target_.IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      instructions +=
+          StaticCall(position, direct_call.target_, 1, Array::null_array(),
+                     ICData::kNoRebind, &result_type);
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+      instructions += InstanceCall(position, Symbols::GetCall(), Token::kGET,
+                                   kTypeArgsLen, 1, Array::null_array(),
+                                   kNumArgsChecked, Function::null_function(),
+                                   Function::null_function(), &result_type);
+    }
   }
 
   if (direct_call.check_receiver_for_null_) {
@@ -2463,24 +2563,59 @@ Fragment StreamingFlowGraphBuilder::BuildInstanceSet(TokenPosition* p) {
     instructions += CheckNull(position, receiver, setter_name);
   }
 
-  if (!direct_call.target_.IsNull()) {
-    ASSERT(CompilerState::Current().is_aot());
-    instructions +=
-        StaticCall(position, direct_call.target_, 2, Array::null_array(),
-                   ICData::kNoRebind, /*result_type=*/nullptr,
-                   /*type_args_count=*/0,
-                   /*use_unchecked_entry=*/is_unchecked_call);
-  } else {
-    const intptr_t kTypeArgsLen = 0;
-    const intptr_t kNumArgsChecked = 1;
+  if (thread()->is_dynamicart()) {
+    if (!direct_call.target_.IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      if (CanReplaceStaticCall(direct_call.target_)) {
+        instructions +=
+            StaticCall(position, direct_call.target_, 2, Array::null_array(),
+                       ICData::kNoRebind, /*result_type=*/nullptr,
+                       /*type_args_count=*/0,
+                       /*use_unchecked_entry=*/is_unchecked_call);
+      } else {
+        const intptr_t kTypeArgsLen = 0;
+        const intptr_t kNumArgsChecked = 1;
 
-    instructions += InstanceCall(
-        position, setter_name, Token::kSET, kTypeArgsLen, 2,
-        Array::null_array(), kNumArgsChecked, interface_target,
-        Function::null_function(),
-        /*result_type=*/nullptr,
-        /*use_unchecked_entry=*/is_unchecked_call, &call_site_attributes,
-        /*receiver_not_smi=*/false, is_call_on_this);
+        instructions += InstanceCall(
+            position, setter_name, Token::kSET, kTypeArgsLen, 2,
+            Array::null_array(), kNumArgsChecked, interface_target,
+            Function::null_function(),
+            /*result_type=*/nullptr,
+            /*use_unchecked_entry=*/is_unchecked_call, &call_site_attributes,
+            /*receiver_not_smi=*/false, is_call_on_this);
+      }
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+
+      instructions += InstanceCall(
+          position, setter_name, Token::kSET, kTypeArgsLen, 2,
+          Array::null_array(), kNumArgsChecked, interface_target,
+          Function::null_function(),
+          /*result_type=*/nullptr,
+          /*use_unchecked_entry=*/is_unchecked_call, &call_site_attributes,
+          /*receiver_not_smi=*/false, is_call_on_this);
+    }
+  } else {
+    if (!direct_call.target_.IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      instructions +=
+          StaticCall(position, direct_call.target_, 2, Array::null_array(),
+                     ICData::kNoRebind, /*result_type=*/nullptr,
+                     /*type_args_count=*/0,
+                     /*use_unchecked_entry=*/is_unchecked_call);
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+
+      instructions += InstanceCall(
+          position, setter_name, Token::kSET, kTypeArgsLen, 2,
+          Array::null_array(), kNumArgsChecked, interface_target,
+          Function::null_function(),
+          /*result_type=*/nullptr,
+          /*use_unchecked_entry=*/is_unchecked_call, &call_site_attributes,
+          /*receiver_not_smi=*/false, is_call_on_this);
+    }
   }
 
   instructions += Drop();  // Drop result of the setter invocation.
@@ -2536,23 +2671,59 @@ Fragment StreamingFlowGraphBuilder::BuildDynamicSet(TokenPosition* p) {
         direct_call.target_.GetDynamicInvocationForwarder(mangled_name));
   }
 
-  if (!direct_call_target->IsNull()) {
-    ASSERT(CompilerState::Current().is_aot());
-    instructions +=
-        StaticCall(position, *direct_call_target, 2, Array::null_array(),
-                   ICData::kNoRebind, /*result_type=*/nullptr,
-                   /*type_args_count=*/0,
-                   /*use_unchecked_entry=*/is_unchecked_call);
-  } else {
-    const intptr_t kTypeArgsLen = 0;
-    const intptr_t kNumArgsChecked = 1;
+  if (thread()->is_dynamicart()) {
+    if (!direct_call_target->IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      if (CanReplaceStaticCall(*direct_call_target)) {
+        instructions +=
+          StaticCall(position, *direct_call_target, 2, Array::null_array(),
+                     ICData::kNoRebind, /*result_type=*/nullptr,
+                     /*type_args_count=*/0,
+                     /*use_unchecked_entry=*/is_unchecked_call);
+      } else {
+        const intptr_t kTypeArgsLen = 0;
+        const intptr_t kNumArgsChecked = 1;
 
-    instructions += InstanceCall(
-        position, mangled_name, Token::kSET, kTypeArgsLen, 2,
-        Array::null_array(), kNumArgsChecked, Function::null_function(),
-        Function::null_function(),
-        /*result_type=*/nullptr,
-        /*use_unchecked_entry=*/is_unchecked_call, /*call_site_attrs=*/nullptr);
+        instructions += InstanceCall(
+            position, mangled_name, Token::kSET, kTypeArgsLen, 2,
+            Array::null_array(), kNumArgsChecked, Function::null_function(),
+            Function::null_function(),
+            /*result_type=*/nullptr,
+            /*use_unchecked_entry=*/is_unchecked_call,
+            /*call_site_attrs=*/nullptr);
+      }
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+
+       instructions += InstanceCall(
+           position, mangled_name, Token::kSET, kTypeArgsLen, 2,
+           Array::null_array(), kNumArgsChecked, Function::null_function(),
+           Function::null_function(),
+           /*result_type=*/nullptr,
+           /*use_unchecked_entry=*/is_unchecked_call,
+           /*call_site_attrs=*/nullptr);
+    }
+  } else {
+    if (!direct_call_target->IsNull()) {
+      ASSERT(CompilerState::Current().is_aot());
+      instructions +=
+          StaticCall(position, *direct_call_target, 2, Array::null_array(),
+                     ICData::kNoRebind, /*result_type=*/nullptr,
+                     /*type_args_count=*/0,
+                     /*use_unchecked_entry=*/is_unchecked_call);
+    } else {
+      const intptr_t kTypeArgsLen = 0;
+      const intptr_t kNumArgsChecked = 1;
+
+      instructions += InstanceCall(
+          position, mangled_name, Token::kSET, kTypeArgsLen, 2,
+          Array::null_array(), kNumArgsChecked, Function::null_function(),
+          Function::null_function(),
+          /*result_type=*/nullptr,
+          /*use_unchecked_entry=*/is_unchecked_call,
+          /*call_site_attrs=*/nullptr);
+    }
   }
 
   instructions += Drop();  // Drop result of the setter invocation.
@@ -3042,22 +3213,53 @@ Fragment StreamingFlowGraphBuilder::BuildMethodInvocation(TokenPosition* p,
     }
   }
 
-  if (!direct_call_target->IsNull()) {
-    // Even if TFA infers a concrete receiver type, the static type of the
-    // call-site may still be dynamic and we need to call the dynamic invocation
-    // forwarder to ensure type-checks are performed.
-    ASSERT(CompilerState::Current().is_aot());
-    instructions +=
-        StaticCall(position, *direct_call_target, argument_count,
-                   argument_names, ICData::kNoRebind, &result_type,
-                   type_args_len, /*use_unchecked_entry=*/is_unchecked_call);
+  if (thread()->is_dynamicart()) {
+    if (!direct_call_target->IsNull()) {
+      // Even if TFA infers a concrete receiver type, the static type of the
+      // call-site may still be dynamic and we need to call the dynamic
+      // invocation forwarder to ensure type-checks are performed.
+      ASSERT(CompilerState::Current().is_aot());
+      if (CanReplaceStaticCall(*direct_call_target)) {
+        instructions +=
+            StaticCall(position, *direct_call_target, argument_count,
+                       argument_names, ICData::kNoRebind, &result_type,
+                       type_args_len,
+                       /*use_unchecked_entry=*/is_unchecked_call);
+      } else {
+        instructions += InstanceCall(
+                position, *mangled_name, token_kind, type_args_len,
+                argument_count, argument_names, checked_argument_count,
+                *interface_target, Function::null_function(), &result_type,
+                /*use_unchecked_entry=*/is_unchecked_call,
+                &call_site_attributes, result_type.ReceiverNotInt(),
+                is_call_on_this);
+      }
+    } else {
+      instructions += InstanceCall(
+              position, *mangled_name, token_kind, type_args_len,
+              argument_count, argument_names, checked_argument_count,
+              *interface_target, Function::null_function(), &result_type,
+              /*use_unchecked_entry=*/is_unchecked_call, &call_site_attributes,
+              result_type.ReceiverNotInt(), is_call_on_this);
+    }
   } else {
-    instructions += InstanceCall(
-        position, *mangled_name, token_kind, type_args_len, argument_count,
-        argument_names, checked_argument_count, *interface_target,
-        Function::null_function(), &result_type,
-        /*use_unchecked_entry=*/is_unchecked_call, &call_site_attributes,
-        result_type.ReceiverNotInt(), is_call_on_this);
+    if (!direct_call_target->IsNull()) {
+      // Even if TFA infers a concrete receiver type, the static type of the
+      // call-site may still be dynamic and we need to call the dynamic
+      // invocation forwarder to ensure type-checks are performed.
+      ASSERT(CompilerState::Current().is_aot());
+      instructions +=
+          StaticCall(position, *direct_call_target, argument_count,
+                     argument_names, ICData::kNoRebind, &result_type,
+                     type_args_len, /*use_unchecked_entry=*/is_unchecked_call);
+    } else {
+      instructions += InstanceCall(
+              position, *mangled_name, token_kind, type_args_len,
+              argument_count, argument_names, checked_argument_count,
+              *interface_target, Function::null_function(), &result_type,
+              /*use_unchecked_entry=*/is_unchecked_call, &call_site_attributes,
+              result_type.ReceiverNotInt(), is_call_on_this);
+    }
   }
 
   // Drop temporaries preserving result on the top of the stack.
@@ -3122,9 +3324,13 @@ Fragment StreamingFlowGraphBuilder::BuildLocalFunctionInvocation(
 
   // Lookup the function in the closure.
   instructions += LoadLocal(variable);
+#if defined(DART_DYNAMIC_PRECOMPILER)
+  instructions += LoadNativeField(Slot::Closure_function());
+#else
   if (!FLAG_precompiled_mode) {
     instructions += LoadNativeField(Slot::Closure_function());
   }
+#endif
   if (parsed_function()->function().is_debuggable()) {
     ASSERT(!parsed_function()->function().is_native());
     instructions += DebugStepCheck(position);
@@ -3185,9 +3391,13 @@ Fragment StreamingFlowGraphBuilder::BuildFunctionInvocation(TokenPosition* p) {
                               /*clear_temp=*/false);
     // Lookup the function in the closure.
     instructions += LoadLocal(receiver_temp);
+#if defined(DART_DYNAMIC_PRECOMPILER)
+    instructions += LoadNativeField(Slot::Closure_function());
+#else
     if (!FLAG_precompiled_mode) {
       instructions += LoadNativeField(Slot::Closure_function());
     }
+#endif
     if (parsed_function()->function().is_debuggable()) {
       ASSERT(!parsed_function()->function().is_native());
       instructions += DebugStepCheck(position);
@@ -5412,7 +5622,7 @@ Fragment StreamingFlowGraphBuilder::BuildFunctionNode(
         if ((FLAG_enable_mirrors && has_valid_annotation) || has_pragma) {
           auto& lib =
               Library::Handle(Z, Class::Handle(Z, function.Owner()).library());
-          lib.AddMetadata(function, func_decl_offset);
+          lib.AddMetadata(function, func_decl_offset, 0);
         }
 
         function.set_is_debuggable(function_node_helper.dart_async_marker_ ==
@@ -5743,5 +5953,58 @@ Fragment StreamingFlowGraphBuilder::BuildFfiNativeCallbackFunction() {
   return code;
 }
 
+bool StreamingFlowGraphBuilder::CanReplaceStaticCall(const Function &function) {
+  if (thread()->is_hotupdate()) {
+    UntaggedFunction::Kind  kind = function.kind();
+      if ((kind == UntaggedFunction::kRegularFunction ||
+           kind == UntaggedFunction::kGetterFunction ||
+           kind == UntaggedFunction::kSetterFunction) &&
+           !Library::IsPrivate(String::Handle(function.name()))) {
+        return false;
+      }
+    } else {
+      if (!strstr(function.ToFullyQualifiedCString(), "package:flutter") &&
+          !strstr(function.ToFullyQualifiedCString(), "dart:")) {
+        return true;
+      }
+      UntaggedFunction::Kind kind = function.kind();
+      if ((kind == UntaggedFunction::kRegularFunction ||
+           kind == UntaggedFunction::kGetterFunction ||
+           kind == UntaggedFunction::kSetterFunction) &&
+          !Library::IsPrivate(String::Handle(function.name()))) {
+        return false;
+      }
+    }
+    return true;
+}
 }  // namespace kernel
 }  // namespace dart
+#else
+#if defined(DART_DYNAMIC_RUNTIME)
+#include "vm/compiler/frontend/kernel_translation_helper.h"
+
+namespace dart {
+namespace kernel {
+Tag KernelReaderHelper::ReadTag(uint8_t *payload) {
+  return reader_.ReadTag(payload);
+}
+
+Tag KernelReaderHelper::PeekTag(uint8_t *payload) {
+  return reader_.PeekTag(payload);
+}
+
+Nullability KernelReaderHelper::ReadNullability() {
+  return reader_.ReadNullability();
+}
+
+Variance KernelReaderHelper::ReadVariance() {
+  if (translation_helper_.info().kernel_binary_version() >= 34) {
+      return reader_.ReadVariance();
+  }
+  return kCovariant;
+}
+}  // namespace kernel
+}  // namespace dart
+#endif
+
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)

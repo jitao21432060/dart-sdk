@@ -62,7 +62,8 @@ Future<CompilerResult> generateKernelInternal(
     bool truncateSummary: false,
     bool includeOffsets: true,
     bool retainDataForTesting: false,
-    bool includeHierarchyAndCoreTypes: false}) async {
+    bool includeHierarchyAndCoreTypes: false,
+    bool? dynamicart}) async {
   ProcessedOptions options = CompilerContext.current.options;
   options.reportNullSafetyCompilationModeInfo();
   FileSystem fs = options.fileSystem;
@@ -96,8 +97,8 @@ Future<CompilerResult> generateKernelInternal(
         new KernelTarget(fs, false, dillTarget, uriTranslator);
     sourceLoader = kernelTarget.loader;
     kernelTarget.setEntryPoints(options.inputs);
-    Component summaryComponent =
-        (await kernelTarget.buildOutlines(nameRoot: nameRoot))!;
+    Component summaryComponent = (await kernelTarget.buildOutlines(
+        nameRoot: nameRoot, dynamicart: dynamicart))!;
     List<int>? summary = null;
     if (buildSummary) {
       if (options.verify) {

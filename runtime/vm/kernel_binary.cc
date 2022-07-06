@@ -1,14 +1,16 @@
 // Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME)|| defined(DART_DYNAMIC_RUNTIME)
 
 #include "vm/kernel_binary.h"
 
 #include <memory>
 
 #include "platform/globals.h"
+#if !defined(DART_DYNAMIC_RUNTIME)
 #include "vm/compiler/frontend/kernel_to_il.h"
+#endif
 #include "vm/dart_api_impl.h"
 #include "vm/flags.h"
 #include "vm/growable_array.h"

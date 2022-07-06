@@ -246,6 +246,7 @@ class FlowGraph : public ZoneAllocated {
 
   Thread* thread() const { return thread_; }
   Zone* zone() const { return thread()->zone(); }
+  Isolate* isolate() const { return thread()->isolate(); }
   IsolateGroup* isolate_group() const { return thread()->isolate_group(); }
 
   intptr_t max_block_id() const { return max_block_id_; }

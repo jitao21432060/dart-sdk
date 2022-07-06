@@ -61,6 +61,8 @@ namespace dart {
 // by the profiler.
 class TokenPosition {
  public:
+  explicit TokenPosition(intptr_t value) : value_(value) {}
+
   uword Hash() const;
 
   // Returns whether the token positions are equal.  Defined for all token
@@ -211,11 +213,10 @@ class TokenPosition {
 
   const char* ToCString() const;
 
- private:
-  explicit TokenPosition(intptr_t value) : value_(value) {}
-
-  // The raw value of this TokenPosition.
   intptr_t value() const { return value_; }
+
+ private:
+  // The raw value of this TokenPosition.
 
   int32_t value_;
 

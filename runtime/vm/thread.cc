@@ -42,6 +42,10 @@ Thread::~Thread() {
   ASSERT(isolate_ == NULL);
   ASSERT(store_buffer_block_ == NULL);
   ASSERT(marking_stack_block_ == NULL);
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  delete interpreter_;
+  interpreter_ = nullptr;
+#endif
   // There should be no top api scopes at this point.
   ASSERT(api_top_scope() == NULL);
   // Delete the resusable api scope if there is one.
@@ -108,6 +112,9 @@ Thread::Thread(bool is_vm_isolate)
 #if defined(USING_SAFE_STACK)
               saved_safestack_limit_(0),
 #endif
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+      interpreter_(nullptr),
+#endif
       next_(NULL) {
 #if defined(SUPPORT_TIMELINE)
   dart_stream_ = Timeline::GetDartStream();
@@ -117,7 +124,9 @@ Thread::Thread(bool is_vm_isolate)
   member_name = default_init_value;
   CACHED_CONSTANTS_LIST(DEFAULT_INIT)
 #undef DEFAULT_INIT
-
+#if defined(DART_DYNAMIC_RUNTIME)
+  patch_function_call_entry_point_ = 0;
+#endif
 #if defined(TARGET_ARCH_ARM) || defined(TARGET_ARCH_ARM64) ||                  \
     defined(TARGET_ARCH_X64)
   for (intptr_t i = 0; i < kNumberOfDartAvailableCpuRegs; ++i) {
@@ -193,7 +202,9 @@ void Thread::InitVMConstants() {
   member_name = (init_expr);
   CACHED_CONSTANTS_LIST(INIT_VALUE)
 #undef INIT_VALUE
-
+#if defined(DART_DYNAMIC_RUNTIME)
+  patch_function_call_entry_point_ = StubCode::PatchFuntionCall().EntryPoint();
+#endif
 #if defined(TARGET_ARCH_ARM) || defined(TARGET_ARCH_ARM64) ||                  \
     defined(TARGET_ARCH_X64)
   for (intptr_t i = 0; i < kNumberOfDartAvailableCpuRegs; ++i) {
@@ -606,6 +617,12 @@ void Thread::VisitObjectPointers(ObjectPointerVisitor* visitor,
   visitor->VisitPointer(reinterpret_cast<ObjectPtr*>(&ffi_callback_code_));
   visitor->VisitPointer(
       reinterpret_cast<ObjectPtr*>(&ffi_callback_stack_return_));
+
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  if (interpreter() != NULL) {
+    interpreter()->VisitObjectPointers(visitor);
+  }
+#endif
 
   // Visit the api local scope as it has all the api local handles.
   ApiLocalScope* scope = api_top_scope_;

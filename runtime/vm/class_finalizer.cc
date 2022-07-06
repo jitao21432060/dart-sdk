@@ -12,6 +12,7 @@
 #include "vm/flags.h"
 #include "vm/hash_table.h"
 #include "vm/heap/heap.h"
+#include "vm/interpreter.h"
 #include "vm/isolate.h"
 #include "vm/kernel_loader.h"
 #include "vm/log.h"
@@ -36,7 +37,7 @@ bool ClassFinalizer::AllClassesFinalized() {
   return classes.Length() == 0;
 }
 
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
 
 bool ClassFinalizer::ProcessPendingClasses() {
   ASSERT(AllClassesFinalized());
@@ -213,8 +214,18 @@ bool ClassFinalizer::ProcessPendingClasses() {
 
     // Finalize types in all classes.
     for (intptr_t i = 0; i < class_array.Length(); i++) {
+#if defined(DART_DYNAMIC_RUNTIME)
+      cls ^= class_array.At(i);
+      if (cls.is_declared_in_bytecode()) {
+        cls.EnsureDeclarationLoaded();
+        ASSERT(cls.is_type_finalized());
+      } else {
+        FinalizeTypesInClass(cls);
+      }
+#else
       cls ^= class_array.At(i);
       FinalizeTypesInClass(cls);
+#endif
     }
 
     // Clear pending classes array.
@@ -578,11 +589,39 @@ void ClassFinalizer::FillAndFinalizeTypeArguments(
     }
     TypeArguments& super_type_args =
         TypeArguments::Handle(zone, super_type.arguments());
+#if !defined(DART_DYNAMIC_RUNTIME)
     // Offset of super type's type parameters in cls' type argument vector.
     const intptr_t super_offset = num_super_type_args - num_super_type_params;
     // If the super type is raw (i.e. super_type_args is null), set to dynamic.
-    AbstractType& super_type_arg =
-        AbstractType::Handle(zone, Type::DynamicType());
+    AbstractType& super_type_arg = AbstractType::Handle(Type::DynamicType());
+#else
+      // Offset of super type's type parameters in cls' type argument vector.
+      intptr_t super_offset = num_super_type_args - num_super_type_params;
+      // If the super type is raw (i.e. super_type_args is null), set to
+      // dynamic.
+      AbstractType& super_type_arg = AbstractType::Handle(Type::DynamicType());
+      if (!super_class.is_declared_in_bytecode()) {
+        super_offset = num_uninitialized_arguments - num_super_type_params;
+        if (super_offset < 0) {
+          super_offset = 0;
+        }
+        for (intptr_t i = super_offset, j = 0;
+             i < num_uninitialized_arguments && j < num_super_type_params;
+             i++, j++) {
+          if (!super_type_args.IsNull()) {
+               super_type_arg = super_type_args.TypeAt(j);
+          }
+          arguments.SetTypeAt(i, super_type_arg);
+        }
+        for (intptr_t i = 0; i < super_offset; i++) {
+          arguments.SetTypeAt(i, super_type_arg);
+        }
+        FillAndFinalizeTypeArguments(zone, super_class, arguments,
+                                     super_offset, pending_types,
+                                     trail);
+        return;
+      }
+#endif
     for (intptr_t i = super_offset; i < num_uninitialized_arguments; i++) {
       if (!super_type_args.IsNull()) {
         super_type_arg = super_type_args.TypeAt(i);
@@ -899,7 +938,7 @@ AbstractTypePtr ClassFinalizer::FinalizeSignature(Zone* zone,
   return signature.ptr();
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 #if defined(TARGET_ARCH_X64)
 static bool IsPotentialExactGeneric(const AbstractType& type) {
@@ -1058,7 +1097,7 @@ void ClassFinalizer::FinalizeTypesInClass(const Class& cls) {
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 void ClassFinalizer::RegisterClassInHierarchy(Zone* zone, const Class& cls) {
   auto& type = AbstractType::Handle(zone, cls.super_type());
   auto& other_cls = Class::Handle(zone);
@@ -1090,7 +1129,7 @@ void ClassFinalizer::FinalizeClass(const Class& cls) {
     return;
   }
 
-#if defined(DART_PRECOMPILED_RUNTIME)
+#if defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_DYNAMIC_RUNTIME)
   UNREACHABLE();
 #else
   Thread* thread = Thread::Current();
@@ -1109,6 +1148,7 @@ void ClassFinalizer::FinalizeClass(const Class& cls) {
   }
 #endif  // defined(SUPPORT_TIMELINE)
 
+#if !defined(DART_PRECOMPILED_RUNTIME)
   // If loading from a kernel, make sure that the class is fully loaded.
   ASSERT(cls.IsTopLevel() || (cls.kernel_offset() > 0));
   if (!cls.is_loaded()) {
@@ -1117,6 +1157,20 @@ void ClassFinalizer::FinalizeClass(const Class& cls) {
       return;
     }
   }
+#elif defined(DART_DYNAMIC_RUNTIME)
+  // If loading from a kernel, make sure that the class is fully loaded.
+  if (!cls.is_loaded() && (cls.IsTopLevel() || cls.is_declared_in_bytecode() ||
+    (cls.kernel_offset() > 0))) {
+    if (cls.is_declared_in_bytecode()) {
+      kernel::BytecodeReader::FinishClassLoading(cls);
+    } else {
+      kernel::KernelLoader::FinishLoading(cls);
+    }
+    if (cls.is_finalized()) {
+      return;
+    }
+  }
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
   // Ensure super class is finalized.
   const Class& super = Class::Handle(cls.SuperClass());
@@ -1146,7 +1200,7 @@ void ClassFinalizer::FinalizeClass(const Class& cls) {
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 ErrorPtr ClassFinalizer::AllocateFinalizeClass(const Class& cls) {
   ASSERT(IsolateGroup::Current()->program_lock()->IsCurrentThreadWriter());
@@ -1205,7 +1259,7 @@ ErrorPtr ClassFinalizer::LoadClassMembers(const Class& cls) {
 
   LongJumpScope jump;
   if (setjmp(*jump.Set()) == 0) {
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
     cls.EnsureDeclarationLoaded();
 #endif
     ASSERT(cls.is_type_finalized());
@@ -1215,7 +1269,9 @@ ErrorPtr ClassFinalizer::LoadClassMembers(const Class& cls) {
     return Thread::Current()->StealStickyError();
   }
 }
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 // Allocate instances for each enumeration value, and populate the
 // static field 'values'.
 // By allocating the instances programmatically, we save an implicit final
@@ -1344,7 +1400,7 @@ void ClassFinalizer::ReportError(const char* format, ...) {
   UNREACHABLE();
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
 
 void ClassFinalizer::VerifyImplicitFieldOffsets() {
 #ifdef DEBUG
@@ -1724,6 +1780,9 @@ void ClassFinalizer::RehashTypes() {
 }
 
 void ClassFinalizer::ClearAllCode(bool including_nonchanging_cids) {
+#if defined(DART_DYNAMIC_RUNTIME)
+  UNREACHABLE()
+#else
   auto const thread = Thread::Current();
   auto const isolate_group = thread->isolate_group();
   SafepointWriteRwLocker ml(thread, isolate_group->program_lock());
@@ -1765,6 +1824,7 @@ void ClassFinalizer::ClearAllCode(bool including_nonchanging_cids) {
     object_store->set_build_generic_method_extractor_code(null_code);
     object_store->set_build_nongeneric_method_extractor_code(null_code);
   }
+#endif
 }
 
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)

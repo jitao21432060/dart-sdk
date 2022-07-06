@@ -193,4 +193,8 @@ class _ImplicitFieldTypeRoot extends ImplicitFieldType {
 
   @override
   String toString() => 'ImplicitFieldType(${toStringInternal()})';
+
+  String bdToString() {
+    return "${toStringInternal()}";
+  }
 }

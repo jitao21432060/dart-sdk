@@ -201,7 +201,7 @@ import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
-export 'dart:_http' hide HttpProfiler;
+export 'dart:_http';
 @Deprecated("Import BytesBuilder from dart:typed_data instead")
 export 'dart:_internal' show BytesBuilder;
 export 'dart:_internal' show HttpStatus;

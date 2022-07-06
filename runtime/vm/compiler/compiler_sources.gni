@@ -109,6 +109,12 @@ compiler_sources = [
   "ffi/recognized_method.h",
   "frontend/base_flow_graph_builder.cc",
   "frontend/base_flow_graph_builder.h",
+  "frontend/bycode_reader.cc",
+  "frontend/bytecode_fingerprints.cc",
+  "frontend/bytecode_fingerprints.h",
+  "frontend/bytecode_reader.h",
+  "frontend/bytecode_scope_builder.cc",
+  "frontend/bytecode_scope_builder.h",
   "frontend/constant_reader.cc",
   "frontend/constant_reader.h",
   "frontend/flow_graph_builder.cc",
@@ -193,6 +199,8 @@ disassembler_sources = [
   "assembler/disassembler.h",
   "assembler/disassembler_arm.cc",
   "assembler/disassembler_arm64.cc",
+  "assembler/disassembler_kbc.cc",
+  "assembler/disassembler_kbc.h",
   "assembler/disassembler_x86.cc",
 ]
 

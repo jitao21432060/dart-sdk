@@ -7,6 +7,7 @@ library front_end.compiler_options;
 import 'package:_fe_analyzer_shared/src/messages/diagnostic_message.dart'
     show DiagnosticMessage, DiagnosticMessageHandler;
 import 'package:_fe_analyzer_shared/src/messages/severity.dart' show Severity;
+import 'package:kernel/ast.dart';
 
 import 'package:kernel/ast.dart' show Version;
 
@@ -37,6 +38,7 @@ import 'file_system.dart' show FileSystem;
 import 'standard_file_system.dart' show StandardFileSystem;
 
 import '../api_unstable/util.dart';
+import 'dart:collection';
 
 export 'package:_fe_analyzer_shared/src/messages/diagnostic_message.dart'
     show DiagnosticMessage;
@@ -213,6 +215,9 @@ class CompilerOptions {
   /// diagnostic, but do not stop the compilation.
   int skipForDebugging = 0;
 
+  /// Whether to generate bytecode.
+  bool bytecode = false;
+
   /// Whether to write a file (e.g. a dill file) when reporting a crash.
   bool writeFileOnCrashReport = true;
 
@@ -285,6 +290,39 @@ class CompilerOptions {
             experimentReleasedVersionForTesting);
   }
 
+  // Build dynamic code bundle
+  bool dynamicdill = false;
+
+  // Build application that support dynamic code push
+  bool dynamicart = false;
+
+  // Generate machine code for the specified library
+  List<String>? dynamicAotLibs = null;
+
+  // Path of .dill
+  String? outputPath = null;
+
+  String? hostDillPath = null;
+
+  Component? hostDillComponent = null;
+
+  // Build application that support hot update
+  bool hotUpdate = false;
+
+  String? hotUpdateFile;
+
+  Component? hotUpdateHostDillComponent = null;
+
+  Set<String> hotUpdateHostLoadedLibs = new HashSet();
+
+  Target? diffTarget;
+
+  @override
+  String toString() {
+    return 'CompilerOptions{sdkRoot: $sdkRoot, librariesSpecificationUri: $librariesSpecificationUri, onDiagnostic: $onDiagnostic, packagesFileUri: $packagesFileUri, sdkSummary: $sdkSummary, declaredVariables: $declaredVariables, fileSystem: $fileSystem, compileSdk: $compileSdk, environmentDefines: $environmentDefines, errorOnUnevaluatedConstant: $errorOnUnevaluatedConstant, target: $target, verbose: $verbose, verify: $verify, debugDump: $debugDump, omitPlatform: $omitPlatform, setExitCodeOnProblem: $setExitCodeOnProblem, embedSourceText: $embedSourceText, throwOnErrorsForDebugging: $throwOnErrorsForDebugging, throwOnWarningsForDebugging: $throwOnWarningsForDebugging, skipForDebugging: $skipForDebugging, bytecode: $bytecode, writeFileOnCrashReport: $writeFileOnCrashReport, currentSdkVersion: $currentSdkVersion, dynamicdill: $dynamicdill, dynamicart: $dynamicart, dynamicAotLibs: $dynamicAotLibs, outputPath: $outputPath, hostDillPath: $hostDillPath}';
+  }
+  // END
+
   /// Return `true` if the experiment with the given [flag] is enabled for the
   /// library with the given [importUri] and language [version].
   bool isExperimentEnabledInLibraryByVersion(
@@ -354,9 +392,14 @@ class CompilerOptions {
       return false;
     }
     if (skipForDebugging != other.skipForDebugging) return false;
+    if (bytecode != other.bytecode) return false;
     if (writeFileOnCrashReport != other.writeFileOnCrashReport) return false;
     if (nnbdMode != other.nnbdMode) return false;
     if (currentSdkVersion != other.currentSdkVersion) return false;
+    if (dynamicdill != other.dynamicdill) return false;
+    if (dynamicart != other.dynamicart) return false;
+    if (outputPath != other.outputPath) return false;
+    if (hostDillPath != other.hostDillPath) return false;
     if (emitDeps != other.emitDeps) return false;
     if (!equalSets(invocationModes, other.invocationModes)) return false;
     if (enableUnscheduledExperiments != other.enableUnscheduledExperiments) {

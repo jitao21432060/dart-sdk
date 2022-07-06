@@ -16,8 +16,6 @@ namespace dart {
 
 DECLARE_FLAG(bool, show_invisible_frames);
 
-static const intptr_t kDefaultStackAllocation = 8;
-
 static StackTracePtr CreateStackTraceObject(
     Zone* zone,
     const GrowableObjectArray& code_list,
@@ -34,6 +32,9 @@ static StackTracePtr CreateStackTraceObject(
   return StackTrace::New(code_array, pc_offset_array);
 }
 
+#if !defined(DART_DYNAMIC_RUNTIME)
+static const intptr_t kDefaultStackAllocation = 8;
+
 static StackTracePtr CurrentSyncStackTraceLazy(Thread* thread,
                                                intptr_t skip_frames = 1) {
   Zone* zone = thread->zone();
@@ -48,6 +49,7 @@ static StackTracePtr CurrentSyncStackTraceLazy(Thread* thread,
 
   return CreateStackTraceObject(zone, code_array, pc_offset_array);
 }
+#endif
 
 static StackTracePtr CurrentSyncStackTrace(Thread* thread,
                                            intptr_t skip_frames = 1) {
@@ -77,9 +79,11 @@ static StackTracePtr CurrentSyncStackTrace(Thread* thread,
 static StackTracePtr CurrentStackTrace(Thread* thread,
                                        bool for_async_function,
                                        intptr_t skip_frames = 1) {
+#if !defined(DART_DYNAMIC_RUNTIME)
   if (FLAG_lazy_async_stacks) {
     return CurrentSyncStackTraceLazy(thread, skip_frames);
   }
+#endif
   // Return the synchronous stack trace.
   return CurrentSyncStackTrace(thread, skip_frames);
 }
@@ -93,6 +97,44 @@ DEFINE_NATIVE_ENTRY(StackTrace_current, 0, 0) {
   return CurrentStackTrace(thread, false);
 }
 
+#if defined(DART_DYNAMIC_RUNTIME)
+static void AppendFrames(const GrowableObjectArray& code_list,
+                         GrowableArray<uword>* pc_offset_list,
+                         int skip_frames) {
+  Thread* thread = Thread::Current();
+  Zone* zone = thread->zone();
+  StackFrameIterator frames(ValidationPolicy::kDontValidateFrames, thread,
+                            StackFrameIterator::kNoCrossThreadIteration);
+  StackFrame* frame = frames.NextFrame();
+  ASSERT(frame != NULL);  // We expect to find a dart invocation frame.
+  Code& code = Code::Handle(zone);
+  Bytecode& bytecode = Bytecode::Handle(zone);
+  for (; frame != NULL; frame = frames.NextFrame()) {
+    if (!frame->IsDartFrame()) {
+      continue;
+    }
+    if (skip_frames > 0) {
+      skip_frames--;
+      continue;
+    }
+
+    if (frame->is_interpreted()) {
+      bytecode = frame->LookupDartBytecode();
+      if (bytecode.function() == Function::null()) {
+        continue;
+      }
+      const intptr_t pc_offset = frame->pc() - bytecode.PayloadStart();
+      code_list.Add(bytecode);
+      pc_offset_list->Add(pc_offset);
+    } else {
+      code = frame->LookupDartCode();
+      const intptr_t pc_offset = frame->pc() - code.PayloadStart();
+      code_list.Add(code);
+      pc_offset_list->Add(pc_offset);
+    }
+  }
+}
+#else
 static void AppendFrames(const GrowableObjectArray& code_list,
                          GrowableArray<uword>* pc_offset_list,
                          int skip_frames) {
@@ -118,6 +160,7 @@ static void AppendFrames(const GrowableObjectArray& code_list,
     pc_offset_list->Add(pc_offset);
   }
 }
+#endif
 
 // Creates a StackTrace object from the current stack.
 //

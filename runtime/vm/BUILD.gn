@@ -32,7 +32,11 @@ import("../lib/profiler_sources.gni")
 import("../lib/typed_data_sources.gni")
 import("../lib/vmservice_sources.gni")
 import("../runtime_args.gni")
-import("compiler/compiler_sources.gni")
+if (dynamicart) {
+  import("compiler/compiler_sources_dynamicart.gni")
+} else {
+  import("compiler/compiler_sources.gni")
+}
 import("heap/heap_sources.gni")
 import("vm_sources.gni")
 

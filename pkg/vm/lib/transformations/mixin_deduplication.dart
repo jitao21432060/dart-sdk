@@ -4,9 +4,49 @@
 
 import 'package:kernel/ast.dart';
 
+void collectHostMixinClasses(Component component,
+    Map<Class, Class> hostMixinClasses, Component? hostDillComponent) {
+  if (hostDillComponent != null) {
+    Map<String, Map<String, Class>> tmpMap = Map();
+    hostDillComponent.libraries.forEach((lib) {
+      String packageName = lib.importUri.toString();
+      if (tmpMap[packageName] == null) {
+        tmpMap[packageName] = Map<String, Class>();
+      }
+      lib.classes.forEach((cls) {
+        if (cls.isAnonymousMixin) {
+          tmpMap[packageName]![cls.name] = cls;
+        }
+      });
+    });
+
+    component.libraries.forEach((lib) {
+      String packageName = lib.importUri.toString();
+      if (tmpMap[packageName] == null) {
+        return;
+      }
+      lib.classes.forEach((cls) {
+        if (tmpMap[packageName]![cls.name] != null) {
+          hostMixinClasses[cls] = cls;
+        }
+      });
+    });
+  }
+}
+
 /// De-duplication of identical mixin applications.
-void transformComponent(Component component) {
-  final deduplicateMixins = new DeduplicateMixinsTransformer();
+void transformComponent(Component component,
+    {Component? hostDillComponent, Component? hotUpdateHostDillComponent}) {
+  // BD ADD: START
+  Map<Class, Class> hostMixinClasses = Map();
+  collectHostMixinClasses(component, hostMixinClasses, hostDillComponent);
+  collectHostMixinClasses(
+      component, hostMixinClasses, hotUpdateHostDillComponent);
+  // END
+
+  // BD MOD: START
+  final deduplicateMixins = new DeduplicateMixinsTransformer(hostMixinClasses);
+  // END
   final referenceUpdater = ReferenceUpdater(deduplicateMixins);
 
   // Deduplicate mixins and re-resolve super initializers.
@@ -81,6 +121,15 @@ class _DeduplicateMixinKey {
 class DeduplicateMixinsTransformer extends RemovingTransformer {
   final _canonicalMixins = new Map<_DeduplicateMixinKey, Class>();
   final _duplicatedMixins = new Map<Class, Class>();
+  // BD ADD: START
+  DeduplicateMixinsTransformer([Map<Class, Class>? hostMixinClasses]) {
+    if (hostMixinClasses != null) {
+      hostMixinClasses.forEach((c, _) {
+        _canonicalMixins.putIfAbsent(new _DeduplicateMixinKey(c), () => c);
+      });
+    }
+  }
+  // END
 
   @override
   TreeNode visitLibrary(Library node, TreeNode? removalSentinel) {

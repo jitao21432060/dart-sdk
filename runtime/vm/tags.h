@@ -20,11 +20,13 @@ class RuntimeEntry;
   V(Idle)     /* isolate is idle and is_runnable() */                          \
   V(LoadWait) /* isolate is idle and !is_runnable() */                         \
   V(VM)       /* Catch all */                                                  \
+  V(LoadBytecode)                                                              \
   V(CompileOptimized)                                                          \
   V(CompileUnoptimized)                                                        \
   V(ClassLoading)                                                              \
   V(CompileParseRegExp)                                                        \
-  V(Dart)                                                                      \
+  V(Dart)                                                              \
+  V(DartInterpreted)                                                           \
   V(GCNewSpace)                                                                \
   V(GCOldSpace)                                                                \
   V(GCIdle)                                                                    \

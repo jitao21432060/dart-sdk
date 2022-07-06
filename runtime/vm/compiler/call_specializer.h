@@ -78,8 +78,11 @@ class CallSpecializer : public FlowGraphVisitor {
   // Find a better place for them.
   virtual void VisitLoadCodeUnits(LoadCodeUnitsInstr* instr);
 
+  virtual bool CanReplaceStaticCall(const Function& function);
+
  protected:
   Thread* thread() const { return flow_graph_->thread(); }
+  Isolate* isolate() const { return flow_graph_->isolate(); }
   IsolateGroup* isolate_group() const { return flow_graph_->isolate_group(); }
   Zone* zone() const { return flow_graph_->zone(); }
   const Function& function() const { return flow_graph_->function(); }

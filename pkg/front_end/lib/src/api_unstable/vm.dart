@@ -31,7 +31,11 @@ export '../api_prototype/incremental_kernel_generator.dart'
         isLegalIdentifier;
 
 export '../api_prototype/kernel_generator.dart'
-    show kernelForModule, kernelForProgram;
+    show
+        kernelForModule,
+        kernelForComponent,
+        kernelForProgram,
+        kernelForPrograms;
 
 export '../api_prototype/lowering_predicates.dart' show isExtensionThisName;
 

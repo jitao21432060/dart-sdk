@@ -9,6 +9,10 @@
 #include "vm/stack_frame.h"
 #include "vm/symbols.h"
 
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+#include "vm/compiler/frontend/bytecode_reader.h"
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
+
 namespace dart {
 
 // Keep in sync with:
@@ -51,6 +55,29 @@ intptr_t FindPcOffset(const PcDescriptors& pc_descs, intptr_t yield_index) {
   }
   UNREACHABLE();  // If we cannot find it we have a bug.
 }
+
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+intptr_t FindPcOffset(const Bytecode& bytecode, intptr_t yield_index) {
+  if (yield_index == UntaggedPcDescriptors::kInvalidYieldIndex) {
+    return 0;
+  }
+  if (!bytecode.HasSourcePositions()) {
+    return 0;
+  }
+  intptr_t last_yield_point = 0;
+  kernel::BytecodeSourcePositionsIterator iter(Thread::Current()->zone(),
+                                               bytecode);
+  while (iter.MoveNext()) {
+    if (iter.IsYieldPoint()) {
+      last_yield_point++;
+    }
+    if (last_yield_point == yield_index) {
+      return iter.PcOffset();
+    }
+  }
+  UNREACHABLE();  // If we cannot find it we have a bug.
+}
+#endif
 
 // Instance caches library and field references.
 // This way we don't have to do the look-ups for every frame in the stack.
@@ -351,7 +378,8 @@ bool CallerClosureFinder::IsRunningAsync(const Closure& receiver_closure) {
 }
 
 ClosurePtr StackTraceUtils::FindClosureInFrame(ObjectPtr* last_object_in_caller,
-                                               const Function& function) {
+                                               const Function& function,
+                                               bool is_interpreted) {
   NoSafepointScope nsp;
 
   ASSERT(!function.IsNull());
@@ -366,7 +394,8 @@ ClosurePtr StackTraceUtils::FindClosureInFrame(ObjectPtr* last_object_in_caller,
   const intptr_t kNumClosureAndArgs = 4;
   auto& closure = Closure::Handle();
   for (intptr_t i = 0; i < kNumClosureAndArgs; i++) {
-    ObjectPtr arg = last_object_in_caller[i];
+    // KBC builds the stack upwards instead of the usual downwards stack.
+    ObjectPtr arg = last_object_in_caller[(is_interpreted ? -i : i)];
     if (arg->IsHeapObject() && arg->GetClassId() == kClosureCid) {
       closure = Closure::RawCast(arg);
       if (closure.function() == function.ptr()) {
@@ -377,6 +406,7 @@ ClosurePtr StackTraceUtils::FindClosureInFrame(ObjectPtr* last_object_in_caller,
   UNREACHABLE();
 }
 
+#if defined(DART_DYNAMIC_RUNTIME)
 ClosurePtr StackTraceUtils::ClosureFromFrameFunction(
     Zone* zone,
     CallerClosureFinder* caller_closure_finder,
@@ -386,8 +416,16 @@ ClosurePtr StackTraceUtils::ClosureFromFrameFunction(
     bool* is_async) {
   auto& closure = Closure::Handle(zone);
   auto& function = Function::Handle(zone);
+  auto& bytecode = Bytecode::Handle(zone);
 
-  function = frame->LookupDartFunction();
+  if (frame->is_interpreted()) {
+    bytecode = frame->LookupDartBytecode();
+    ASSERT(!bytecode.IsNull());
+    function = bytecode.function();
+    RELEASE_ASSERT(function.ptr() == frame->LookupDartFunction());
+  } else {
+    function = frame->LookupDartFunction();
+  }
   if (function.IsNull()) {
     return Closure::null();
   }
@@ -397,7 +435,8 @@ ClosurePtr StackTraceUtils::ClosureFromFrameFunction(
     // through the yields.
     ObjectPtr* last_caller_obj =
         reinterpret_cast<ObjectPtr*>(frame->GetCallerSp());
-    closure = FindClosureInFrame(last_caller_obj, function);
+    closure = FindClosureInFrame(last_caller_obj,
+                                 function, frame->is_interpreted());
 
     // If this async function hasn't yielded yet, we're still dealing with a
     // normal stack. Continue to next frame as usual.
@@ -416,7 +455,14 @@ ClosurePtr StackTraceUtils::ClosureFromFrameFunction(
   DartFrameIterator future_frames(frames);
   if (function.recognized_kind() == MethodRecognizer::kRootZoneRunUnary) {
     frame = future_frames.NextFrame();
-    function = frame->LookupDartFunction();
+    if (frame->is_interpreted()) {
+        bytecode = frame->LookupDartBytecode();
+        ASSERT(!bytecode.IsNull());
+        function = bytecode.function();
+        RELEASE_ASSERT(function.ptr() == frame->LookupDartFunction());
+    } else {
+        function = frame->LookupDartFunction();
+    }
     if (function.recognized_kind() !=
         MethodRecognizer::kFutureListenerHandleValue) {
       return Closure::null();
@@ -449,6 +495,9 @@ void StackTraceUtils::UnwindAwaiterChain(
   auto& function = Function::Handle(zone);
   auto& closure = Closure::Handle(zone, leaf_closure.ptr());
   auto& pc_descs = PcDescriptors::Handle(zone);
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+  auto& bytecode = Bytecode::Handle(zone);
+#endif
 
   // Inject async suspension marker.
   code_array.Add(StubCode::AsynchronousGapMarker());
@@ -457,6 +506,305 @@ void StackTraceUtils::UnwindAwaiterChain(
   // Traverse the trail of async futures all the way up.
   for (; !closure.IsNull();
        closure = caller_closure_finder->FindCaller(closure)) {
+    function = closure.function();
+    if (function.IsNull()) {
+      continue;
+    }
+    // In hot-reload-test-mode we sometimes have to do this:
+    if (!function.HasBytecode()) {
+        code = function.EnsureHasCode();
+        RELEASE_ASSERT(!code.IsNull());
+        code_array.Add(code);
+        pc_descs = code.pc_descriptors();
+    } else {
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+        bytecode = function.bytecode();
+        RELEASE_ASSERT(!bytecode.IsNull());
+        code_array.Add(bytecode);
+        pc_descs = bytecode.pc_descriptors();
+#else
+        UNREACHABLE();
+#endif
+    }
+    const intptr_t pc_offset = FindPcOffset(pc_descs, GetYieldIndex(closure));
+    // Unlike other sources of PC offsets, the offset may be 0 here if we
+    // reach a non-async closure receiving the yielded value.
+    ASSERT(pc_offset >= 0);
+    pc_offset_array->Add(pc_offset);
+
+    // Inject async suspension marker.
+    code_array.Add(StubCode::AsynchronousGapMarker());
+    pc_offset_array->Add(0);
+  }
+}
+
+void StackTraceUtils::CollectFramesLazy(
+    Thread* thread,
+    const GrowableObjectArray& code_array,
+    GrowableArray<uword>* pc_offset_array,
+    int skip_frames,
+    std::function<void(StackFrame*)>* on_sync_frames,
+    bool* has_async) {
+  if (has_async != nullptr) {
+    *has_async = false;
+  }
+  Zone* zone = thread->zone();
+  DartFrameIterator frames(thread, StackFrameIterator::kNoCrossThreadIteration);
+  StackFrame* frame = frames.NextFrame();
+
+  // If e.g. the isolate is paused before executing anything, we might not get
+  // any frames at all. Bail:
+  if (frame == nullptr) {
+    return;
+  }
+
+  auto& code = Code::Handle(zone);
+  auto& bytecode = Bytecode::Handle(zone);
+
+  auto& closure = Closure::Handle(zone);
+
+  CallerClosureFinder caller_closure_finder(zone);
+
+  // Start by traversing the sync. part of the stack.
+  for (; frame != nullptr; frame = frames.NextFrame()) {
+    if (skip_frames > 0) {
+      skip_frames--;
+      continue;
+    }
+
+    if (frame->is_interpreted()) {
+      bytecode = frame->LookupDartBytecode();
+      ASSERT(!bytecode.IsNull());
+      auto &function = Function::Handle(zone);
+      function = bytecode.function();
+      if (function.IsNull()) {
+        continue;
+      }
+    }
+
+    // If we encounter a known part of the async/Future mechanism, unwind the
+    // awaiter chain from the closures.
+    bool skip_frame = false;
+    bool is_async = false;
+    closure = ClosureFromFrameFunction(zone, &caller_closure_finder, frames,
+                                       frame, &skip_frame, &is_async);
+
+    if (!skip_frame) {
+      if (frame->is_interpreted()) {
+        bytecode = frame->LookupDartBytecode();
+        code_array.Add(bytecode);
+        const uword pc_offset = frame->pc() - bytecode.PayloadStart();
+        pc_offset_array->Add(pc_offset);
+      } else {
+        // Add the current synchronous frame.
+        code = frame->LookupDartCode();
+        code_array.Add(code);
+        const uword pc_offset = frame->pc() - code.PayloadStart();
+        ASSERT(pc_offset > 0 && pc_offset <= code.Size());
+        pc_offset_array->Add(pc_offset);
+      }
+      // Callback for sync frame.
+      if (on_sync_frames != nullptr) {
+        (*on_sync_frames)(frame);
+      }
+    }
+
+    // This frame is running async.
+    // Note: The closure might still be null in case it's an unawaited future.
+    if (is_async) {
+      UnwindAwaiterChain(zone, code_array, pc_offset_array,
+                         &caller_closure_finder, closure);
+      if (has_async != nullptr) {
+        *has_async = true;
+      }
+      // Ignore the rest of the stack; already unwound all async calls.
+      return;
+    }
+  }
+
+  return;
+}
+
+intptr_t StackTraceUtils::CountFrames(Thread* thread,
+                                      int skip_frames,
+                                      const Function& async_function,
+                                      bool* sync_async_end) {
+  Zone* zone = thread->zone();
+  intptr_t frame_count = 0;
+  DartFrameIterator frames(thread, StackFrameIterator::kNoCrossThreadIteration);
+  StackFrame* frame = frames.NextFrame();
+  ASSERT(frame != nullptr);  // We expect to find a dart invocation frame.
+  Function& function = Function::Handle(zone);
+  Code& code = Code::Handle(zone);
+  Closure& closure = Closure::Handle(zone);
+  Bytecode& bytecode = Bytecode::Handle(zone);
+  const bool async_function_is_null = async_function.IsNull();
+
+  ASSERT(async_function_is_null || sync_async_end != nullptr);
+
+  for (; frame != nullptr; frame = frames.NextFrame()) {
+    if (skip_frames > 0) {
+      skip_frames--;
+      continue;
+    }
+    if (frame->is_interpreted()) {
+      bytecode = frame->LookupDartBytecode();
+      function = bytecode.function();
+      if (function.IsNull()) continue;
+      frame_count++;
+    } else {
+      code = frame->LookupDartCode();
+      function = code.function();
+      frame_count++;
+    }
+    const bool function_is_null = function.IsNull();
+
+    if (!async_function_is_null && !function_is_null &&
+        function.parent_function() != Function::null()) {
+      if (async_function.ptr() == function.parent_function()) {
+        if (function.IsAsyncClosure() || function.IsAsyncGenClosure()) {
+          ObjectPtr* last_caller_obj =
+              reinterpret_cast<ObjectPtr*>(frame->GetCallerSp());
+          closure = FindClosureInFrame(last_caller_obj,
+                                       function, frame->is_interpreted());
+          if (CallerClosureFinder::IsRunningAsync(closure)) {
+            *sync_async_end = false;
+            return frame_count;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  if (!async_function_is_null) {
+    *sync_async_end = true;
+  }
+
+  return frame_count;
+}
+
+intptr_t StackTraceUtils::CollectFrames(Thread* thread,
+                                        const Array& code_array,
+                                        const TypedData& pc_offset_array,
+                                        intptr_t array_offset,
+                                        intptr_t count,
+                                        int skip_frames) {
+  Zone* zone = thread->zone();
+  DartFrameIterator frames(thread, StackFrameIterator::kNoCrossThreadIteration);
+  StackFrame* frame = frames.NextFrame();
+  ASSERT(frame != NULL);  // We expect to find a dart invocation frame.
+  Function& function = Function::Handle(zone);
+  Code& code = Code::Handle(zone);
+  Bytecode& bytecode = Bytecode::Handle(zone);
+  intptr_t collected_frames_count = 0;
+  for (; (frame != NULL) && (collected_frames_count < count);
+       frame = frames.NextFrame()) {
+    if (skip_frames > 0) {
+      skip_frames--;
+      continue;
+    }
+    if (frame->is_interpreted()) {
+      bytecode = frame->LookupDartBytecode();
+      function = bytecode.function();
+      if (function.IsNull()) {
+        continue;
+      }
+      const intptr_t pc_offset = frame->pc() - bytecode.PayloadStart();
+      code_array.SetAt(array_offset, bytecode);
+      pc_offset_array.SetUintPtr(array_offset * kWordSize, pc_offset);
+    } else {
+      code = frame->LookupDartCode();
+      const intptr_t pc_offset = frame->pc() - code.PayloadStart();
+      code_array.SetAt(array_offset, code);
+      pc_offset_array.SetUintPtr(array_offset * kWordSize, pc_offset);
+    }
+    array_offset++;
+    collected_frames_count++;
+  }
+  return collected_frames_count;
+}
+#else
+ClosurePtr StackTraceUtils::ClosureFromFrameFunction(
+        Zone* zone,
+        CallerClosureFinder* caller_closure_finder,
+        const DartFrameIterator& frames,
+        StackFrame* frame,
+        bool* skip_frame,
+        bool* is_async) {
+  auto& closure = Closure::Handle(zone);
+  auto& function = Function::Handle(zone);
+
+  function = frame->LookupDartFunction();
+  if (function.IsNull()) {
+    return Closure::null();
+  }
+
+  if (function.IsAsyncClosure() || function.IsAsyncGenClosure()) {
+    // Next, look up caller's closure on the stack and walk backwards
+    // through the yields.
+    ObjectPtr* last_caller_obj =
+            reinterpret_cast<ObjectPtr*>(frame->GetCallerSp());
+    closure = FindClosureInFrame(last_caller_obj, function, false);
+
+    // If this async function hasn't yielded yet, we're still dealing with a
+    // normal stack. Continue to next frame as usual.
+    if (!caller_closure_finder->IsRunningAsync(closure)) {
+      return Closure::null();
+    }
+
+    *is_async = true;
+
+    // Skip: Already handled this as a sync. frame.
+    return caller_closure_finder->FindCaller(closure);
+  }
+
+  // May have been called from `_FutureListener.handleValue`, which means its
+  // receiver holds the Future chain.
+  DartFrameIterator future_frames(frames);
+  if (function.recognized_kind() == MethodRecognizer::kRootZoneRunUnary) {
+    frame = future_frames.NextFrame();
+    function = frame->LookupDartFunction();
+    if (function.recognized_kind() !=
+        MethodRecognizer::kFutureListenerHandleValue) {
+      return Closure::null();
+    }
+  }
+  if (function.recognized_kind() ==
+      MethodRecognizer::kFutureListenerHandleValue) {
+    *is_async = true;
+    *skip_frame = true;
+
+    // The _FutureListener receiver is at the top of the previous frame, right
+    // before the arguments to the call.
+    Object& receiver =
+            Object::Handle(*(reinterpret_cast<ObjectPtr*>(frame->GetCallerSp())
+                         + kNumArgsFutureListenerHandleValue));
+
+    return caller_closure_finder->GetCallerInFutureListener(receiver);
+  }
+
+  return Closure::null();
+}
+
+void StackTraceUtils::UnwindAwaiterChain(
+        Zone* zone,
+        const GrowableObjectArray& code_array,
+        GrowableArray<uword>* pc_offset_array,
+        CallerClosureFinder* caller_closure_finder,
+        const Closure& leaf_closure) {
+  auto& code = Code::Handle(zone);
+  auto& function = Function::Handle(zone);
+  auto& closure = Closure::Handle(zone, leaf_closure.ptr());
+  auto& pc_descs = PcDescriptors::Handle(zone);
+
+  // Inject async suspension marker.
+  code_array.Add(StubCode::AsynchronousGapMarker());
+  pc_offset_array->Add(0);
+
+  // Traverse the trail of async futures all the way up.
+  for (; !closure.IsNull();
+         closure = caller_closure_finder->FindCaller(closure)) {
     function = closure.function();
     if (function.IsNull()) {
       continue;
@@ -479,12 +827,12 @@ void StackTraceUtils::UnwindAwaiterChain(
 }
 
 void StackTraceUtils::CollectFramesLazy(
-    Thread* thread,
-    const GrowableObjectArray& code_array,
-    GrowableArray<uword>* pc_offset_array,
-    int skip_frames,
-    std::function<void(StackFrame*)>* on_sync_frames,
-    bool* has_async) {
+        Thread* thread,
+        const GrowableObjectArray& code_array,
+        GrowableArray<uword>* pc_offset_array,
+        int skip_frames,
+        std::function<void(StackFrame*)>* on_sync_frames,
+        bool* has_async) {
   if (has_async != nullptr) {
     *has_async = false;
   }
@@ -581,7 +929,7 @@ intptr_t StackTraceUtils::CountFrames(Thread* thread,
         if (function.IsAsyncClosure() || function.IsAsyncGenClosure()) {
           ObjectPtr* last_caller_obj =
               reinterpret_cast<ObjectPtr*>(frame->GetCallerSp());
-          closure = FindClosureInFrame(last_caller_obj, function);
+          closure = FindClosureInFrame(last_caller_obj, function, false);
           if (CallerClosureFinder::IsRunningAsync(closure)) {
             *sync_async_end = false;
             return frame_count;
@@ -626,5 +974,6 @@ intptr_t StackTraceUtils::CollectFrames(Thread* thread,
   }
   return collected_frames_count;
 }
+#endif
 
 }  // namespace dart

@@ -7,6 +7,8 @@
 
 #include <memory>
 #include <utility>
+#include <map>
+#include <string>
 
 #include "lib/stacktrace.h"
 #include "platform/assert.h"
@@ -22,6 +24,11 @@
 #include "vm/debugger.h"
 #include "vm/dwarf.h"
 #include "vm/elf.h"
+#if !defined(DART_PRECOMPILED_RUNTIME) || defined(DART_DYNAMIC_RUNTIME)
+#include "vm/compiler/assembler/disassembler_kbc.h"
+#include "vm/kernel.h"
+#include "vm/kernel_loader.h"
+#endif
 #include "vm/exceptions.h"
 #include "vm/flags.h"
 #include "vm/growable_array.h"
@@ -57,7 +64,6 @@
 
 #if !defined(DART_PRECOMPILED_RUNTIME)
 #include "vm/compiler/aot/precompiler.h"
-#include "vm/kernel_loader.h"
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
 namespace dart {
@@ -5811,6 +5817,96 @@ DART_EXPORT Dart_Handle Dart_LoadLibraryFromKernel(const uint8_t* buffer,
 
   return Api::NewHandle(T, result.ptr());
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
+}
+
+DART_EXPORT Dart_Handle Dart_LoadLibraryFromKernelInterp(const uint8_t *buffer,
+                                                    intptr_t buffer_size) {
+#if !defined(DART_DYNAMIC_RUNTIME)
+  return Api::NewError("Dart_LoadLibraryFromKernelInterp can only run on an"
+                       "compile on an DART_DYNAMIC_RUNTIME.");
+#else
+  DARTSCOPE(Thread::Current());
+  API_TIMELINE_DURATION(T);
+  StackZone zone(T);
+
+  CHECK_CALLBACK_STATE(T);
+
+  // NOTE: We do not attach a finalizer for this object, because the embedder
+  // will/should free it once the isolate group has shutdown.
+  // See also http://dartbug.com/37030.
+  const auto& td = ExternalTypedData::Handle(ExternalTypedData::New(
+      kExternalTypedDataUint8ArrayCid, const_cast<uint8_t*>(buffer),
+      buffer_size, Heap::kOld));
+
+  const char* error = nullptr;
+  std::unique_ptr<kernel::Program> program =
+      kernel::Program::ReadFromTypedData(td, &error);
+  if (program == nullptr) {
+    return Api::NewError("Can't load Kernel binary: %s.", error);
+  }
+  const Object& result =
+      kernel::KernelLoader::LoadEntireProgram(program.get(), false);
+  program.reset();
+  OS::PrintErr("kb result=%s", result.ToCString());
+
+  const Library& lib = Library::Cast(result);
+  Function& f = Function::Handle();
+  f = lib.LookupFunctionAllowPrivate(String::Handle(String::New("main")));
+  f.ImplicitClosureFunction();
+  return Api::NewHandle(T, result.ptr());
+#endif
+}
+
+DART_EXPORT Dart_Handle Dart_DynamicPageLoad(const uint8_t *buffer,
+                                             intptr_t buffer_size,
+                                             const char* pageContentCStr) {
+#if !defined(DART_DYNAMIC_RUNTIME)
+  return Api::NewError("Dart_DynamicWidgetLoad can only run on an compile on "
+                       "an DART_DYNAMIC_RUNTIME.");
+#else
+  DARTSCOPE(Thread::Current());
+    API_TIMELINE_DURATION(T);
+    StackZone zone(T);
+
+    CHECK_CALLBACK_STATE(T);
+
+    Isolate* isolate = Isolate::Current();
+    std::string pageContent = pageContentCStr;
+    std::map<std::string, int>* pageKeys = isolate->getPageKeys();
+    std::string delimiter = "\n";
+    size_t pos = 0;
+    std::string token;
+    while ((pos = pageContent.find(delimiter)) != std::string::npos) {
+      token = pageContent.substr(0, pos);
+      (*pageKeys)[token] = 1;
+      pageContent.erase(0, pos + delimiter.length());
+    }
+    if (!pageContent.empty()) {
+      (*pageKeys)[pageContent] = 1;
+    }
+
+    // NOTE: We do not attach a finalizer for this object, because the embedder
+    // will/should free it once the isolate group has shutdown.
+    // See also http://dartbug.com/37030.
+    const auto& td = ExternalTypedData::Handle(ExternalTypedData::New(
+            kExternalTypedDataUint8ArrayCid, const_cast<uint8_t*>(buffer),
+            buffer_size, Heap::kOld));
+
+    const char* error = nullptr;
+    std::unique_ptr<kernel::Program> program =
+            kernel::Program::ReadFromTypedData(td, &error);
+    if (program == nullptr) {
+        return Api::NewError("Can't load Kernel binary: %s.", error);
+    }
+    const Object& result =
+            kernel::KernelLoader::LoadEntireProgram(program.get(), false);
+    program.reset();
+    OS::PrintErr("kb result=%s", result.ToCString());
+
+//    IsolateGroupSource* source = Isolate::Current()->source();
+//    source->add_loaded_blob(Z, td);
+    return Dart_True();
+#endif
 }
 
 // Finalizes classes and invokes Dart core library function that completes

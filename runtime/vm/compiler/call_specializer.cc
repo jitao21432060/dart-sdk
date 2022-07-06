@@ -14,6 +14,7 @@ namespace dart {
 
 // Quick access to the current isolate and zone.
 #define IG (isolate_group())
+#define I (isolate())
 #define Z (zone())
 
 static void RefineUseTypes(Definition* instr) {
@@ -199,10 +200,20 @@ void CallSpecializer::SpecializePolymorphicInstanceCall(
 
   ASSERT(targets->HasSingleTarget());
   const Function& target = targets->FirstTarget();
-  StaticCallInstr* specialized =
-      StaticCallInstr::FromCall(Z, call, target, targets->AggregateCallCount());
-  call->ReplaceWith(specialized, current_iterator());
-}
+    if (I->dynamicart()) {
+      if (CanReplaceStaticCall(target)) {
+        StaticCallInstr* specialized =
+                StaticCallInstr::FromCall(Z, call, target,
+                                    targets->AggregateCallCount());
+        call->ReplaceWith(specialized, current_iterator());
+      }
+    } else {
+      StaticCallInstr* specialized =
+              StaticCallInstr::FromCall(Z, call, target,
+                                  targets->AggregateCallCount());
+      call->ReplaceWith(specialized, current_iterator());
+    }
+  }
 
 void CallSpecializer::ReplaceCallWithResult(Definition* call,
                                             Instruction* replacement,
@@ -1022,9 +1033,12 @@ bool CallSpecializer::TryInlineInstanceMethod(InstanceCallInstr* call) {
         break;
     }
   }
-
-  return FlowGraphInliner::TryReplaceInstanceCallWithInline(
-      flow_graph_, current_iterator(), call, speculative_policy_);
+  if (I->dynamicart()) {
+    return false;
+  } else {
+    return FlowGraphInliner::TryReplaceInstanceCallWithInline(
+            flow_graph_, current_iterator(), call, speculative_policy_);
+  }
 }
 
 // If type tests specified by 'ic_data' do not depend on type arguments,
@@ -1238,60 +1252,67 @@ void CallSpecializer::ReplaceWithInstanceOf(InstanceCallInstr* call) {
     type = AbstractType::Cast(call->ArgumentAt(3)->AsConstant()->value()).ptr();
   }
 
-  if (TryOptimizeInstanceOfUsingStaticTypes(call, type)) {
-    return;
-  }
+  if (!thread()->is_dynamicart()) {
+    if (TryOptimizeInstanceOfUsingStaticTypes(call, type)) {
+        return;
+    }
 
-  if (TypeCheckAsClassEquality(type)) {
-    LoadClassIdInstr* left_cid = new (Z) LoadClassIdInstr(new (Z) Value(left));
-    InsertBefore(call, left_cid, NULL, FlowGraph::kValue);
-    const intptr_t type_cid = Class::Handle(Z, type.type_class()).id();
-    ConstantInstr* cid =
-        flow_graph()->GetConstant(Smi::Handle(Z, Smi::New(type_cid)));
+    if (TypeCheckAsClassEquality(type)) {
+      LoadClassIdInstr *left_cid =
+        new(Z) LoadClassIdInstr(new(Z) Value(left));
+      InsertBefore(call, left_cid, NULL, FlowGraph::kValue);
+      const intptr_t type_cid = Class::Handle(Z, type.type_class()).id();
+      ConstantInstr *cid =
+              flow_graph()->GetConstant(Smi::Handle(Z, Smi::New(type_cid)));
 
-    StrictCompareInstr* check_cid = new (Z) StrictCompareInstr(
-        call->source(), Token::kEQ_STRICT, new (Z) Value(left_cid),
-        new (Z) Value(cid), /* number_check = */ false, DeoptId::kNone);
-    ReplaceCall(call, check_cid);
-    return;
-  }
+      StrictCompareInstr *check_cid = new(Z) StrictCompareInstr(
+              InstructionSource(call->token_pos(), -1), Token::kEQ_STRICT,
+              new(Z) Value(left_cid), new(Z) Value(cid),
+              /* number_check = */ false, DeoptId::kNone);
+      ReplaceCall(call, check_cid);
+      return;
+    }
 
-  if (TryReplaceInstanceOfWithRangeCheck(call, type)) {
-    return;
-  }
+    if (TryReplaceInstanceOfWithRangeCheck(call, type)) {
+        return;
+    }
 
-  const ICData& unary_checks =
-      ICData::ZoneHandle(Z, call->ic_data()->AsUnaryClassChecks());
-  const intptr_t number_of_checks = unary_checks.NumberOfChecks();
-  if (number_of_checks > 0 && number_of_checks <= FLAG_max_polymorphic_checks) {
-    ZoneGrowableArray<intptr_t>* results =
-        new (Z) ZoneGrowableArray<intptr_t>(number_of_checks * 2);
-    const Bool& as_bool =
-        Bool::ZoneHandle(Z, InstanceOfAsBool(unary_checks, type, results));
-    if (as_bool.IsNull() || CompilerState::Current().is_aot()) {
-      if (results->length() == number_of_checks * 2) {
-        const bool can_deopt = SpecializeTestCidsForNumericTypes(results, type);
-        if (can_deopt &&
-            !speculative_policy_->IsAllowedForInlining(call->deopt_id())) {
-          // Guard against repeated speculative inlining.
+    const ICData &unary_checks =
+            ICData::ZoneHandle(Z, call->ic_data()->AsUnaryClassChecks());
+    const intptr_t number_of_checks = unary_checks.NumberOfChecks();
+    if (number_of_checks > 0 && number_of_checks <=
+                                    FLAG_max_polymorphic_checks) {
+      ZoneGrowableArray<intptr_t> *results =
+              new(Z) ZoneGrowableArray<intptr_t>(number_of_checks * 2);
+      const Bool &as_bool =
+              Bool::ZoneHandle(Z,
+                           InstanceOfAsBool(unary_checks, type, results));
+      if (as_bool.IsNull() || CompilerState::Current().is_aot()) {
+        if (results->length() == number_of_checks * 2) {
+          const bool can_deopt =
+              SpecializeTestCidsForNumericTypes(results, type);
+          if (can_deopt &&
+              !speculative_policy_->IsAllowedForInlining(call->deopt_id())) {
+            // Guard against repeated speculative inlining.
+            return;
+          }
+          TestCidsInstr *test_cids = new(Z) TestCidsInstr(
+                  call->source(), Token::kIS, new(Z) Value(left), *results,
+                  can_deopt ? call->deopt_id() : DeoptId::kNone);
+          // Remove type.
+          ReplaceCall(call, test_cids);
           return;
         }
-        TestCidsInstr* test_cids = new (Z) TestCidsInstr(
-            call->source(), Token::kIS, new (Z) Value(left), *results,
-            can_deopt ? call->deopt_id() : DeoptId::kNone);
-        // Remove type.
-        ReplaceCall(call, test_cids);
+      } else {
+        // One result only.
+        AddReceiverCheck(call);
+        ConstantInstr *bool_const = flow_graph()->GetConstant(as_bool);
+        ASSERT(!call->HasPushArguments());
+        call->ReplaceUsesWith(bool_const);
+        ASSERT(current_iterator()->Current() == call);
+        current_iterator()->RemoveCurrentFromGraph();
         return;
       }
-    } else {
-      // One result only.
-      AddReceiverCheck(call);
-      ConstantInstr* bool_const = flow_graph()->GetConstant(as_bool);
-      ASSERT(!call->HasPushArguments());
-      call->ReplaceUsesWith(bool_const);
-      ASSERT(current_iterator()->Current() == call);
-      current_iterator()->RemoveCurrentFromGraph();
-      return;
     }
   }
 
@@ -1769,6 +1790,31 @@ void TypedDataSpecializer::AppendStoreIndexed(TemplateDartCall<0>* call,
 
 void CallSpecializer::ReplaceInstanceCallsWithDispatchTableCalls() {
   // Only implemented for AOT.
+}
+
+bool CallSpecializer::CanReplaceStaticCall(const Function &function) {
+  if (thread()->is_hotupdate()) {
+    UntaggedFunction::Kind  kind = function.kind();
+    if ((kind == UntaggedFunction::kRegularFunction ||
+         kind == UntaggedFunction::kGetterFunction ||
+         kind == UntaggedFunction::kSetterFunction)
+        && !Library::IsPrivate(String::Handle(function.name()))) {
+      return false;
+    }
+  } else {
+    if (!strstr(function.ToFullyQualifiedCString(), "package:flutter")&&
+        !strstr(function.ToFullyQualifiedCString(), "dart:")) {
+      return true;
+    }
+    UntaggedFunction::Kind  kind = function.kind();
+    if ((kind == UntaggedFunction::kRegularFunction ||
+         kind == UntaggedFunction::kGetterFunction ||
+         kind == UntaggedFunction::kSetterFunction)
+        && !Library::IsPrivate(String::Handle(function.name()))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace dart

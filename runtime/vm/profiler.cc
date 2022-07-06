@@ -727,7 +727,7 @@ class ProfilerDartStackWalker : public ProfilerStackWalker {
 
     for (;;) {
       // Skip entry frame.
-      if (StubCode::InInvocationStub(reinterpret_cast<uword>(pc_))) {
+      if (StubCode::InInvocationStub(reinterpret_cast<uword>(pc_), false)) {
         pc_ = 0;
         fp_ = ExitLink();
         if (fp_ == 0) {
@@ -740,7 +740,7 @@ class ProfilerDartStackWalker : public ProfilerStackWalker {
 
         // At least one frame between exit and next entry frame.
         RELEASE_ASSERT(
-            !StubCode::InInvocationStub(reinterpret_cast<uword>(pc_)));
+            !StubCode::InInvocationStub(reinterpret_cast<uword>(pc_), false));
       }
 
       if (!Append(reinterpret_cast<uword>(pc_), reinterpret_cast<uword>(fp_))) {
